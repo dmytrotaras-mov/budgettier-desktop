@@ -1,0 +1,67 @@
+# Builds and publishes a macOS DMG when a version tag (vX.Y.Z) is pushed.
+#
+# To cut a release:
+#   1. Bump "version" in src-tauri/tauri.conf.json (and package.json).
+#   2. git tag v0.1.0 && git push origin v0.1.0
+#
+# The workflow builds the app, signs the update bundle with the Tauri key,
+# creates a GitHub Release, and uploads the DMG + latest.json (the manifest
+# the in-app updater reads).
+#
+# Required repo secrets:
+#   TAURI_SIGNING_PRIVATE_KEY           - contents of budgettier-updater.key
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  - the password for that key
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: macos-latest
+    permissions:
+      contents: write # needed to create the GitHub Release
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust (Apple Silicon target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          # Apple Silicon build only (the user's target). Add x86_64 here if
+          # Intel Mac support is ever needed.
+          args: --target aarch64-apple-darwin
+          tagName: ${{ github.ref_name }}
+          releaseName: "Budgettier ${{ github.ref_name }}"
+          releaseBody: "See the assets below to download and install Budgettier."
+          releaseDraft: false
+          prerelease: false
+          # tauri-action generates latest.json automatically when the updater
+          # is configured, and uploads it to the release.
+          updaterJsonPreferNsis: false

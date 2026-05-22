@@ -28,3 +28,7 @@ scripts/budgettier.db
 *.db
 *.db-wal
 *.db-shm
+
+# Tauri updater private signing key — NEVER commit
+*.key
+budgettier-updater.key
