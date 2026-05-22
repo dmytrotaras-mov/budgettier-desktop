@@ -47,11 +47,12 @@ export function WalletSelector({
     }, 300);
   };
 
-  const formatBalance = (balance: number) => {
+  const formatBalance = (balance: number | string) => {
+    const n = typeof balance === "string" ? parseFloat(balance) : balance;
     return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: "USD",
-    }).format(balance);
+    }).format(Number.isFinite(n) ? n : 0);
   };
 
   return (

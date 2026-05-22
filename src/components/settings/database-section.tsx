@@ -8,11 +8,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { save, open, message } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { Download, Upload } from "lucide-react";
+import { Download, Upload, FileSpreadsheet } from "lucide-react";
 
 export default function DatabaseSection() {
   const { toast } = useToast();
-  const [busy, setBusy] = useState<"backup" | "restore" | null>(null);
+  const [busy, setBusy] = useState<"backup" | "restore" | "csv" | null>(null);
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -32,6 +32,30 @@ export default function DatabaseSection() {
     } catch (err: any) {
       toast({
         title: "Backup failed",
+        description: String(err?.message || err),
+        variant: "destructive",
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleExportCsv = async () => {
+    try {
+      const path = await save({
+        defaultPath: `budgettier-transactions-${today}.csv`,
+        filters: [{ name: "CSV", extensions: ["csv"] }],
+      });
+      if (!path) return;
+      setBusy("csv");
+      const count = await invoke<number>("export_csv", { destPath: path });
+      toast({
+        title: "CSV exported",
+        description: `${count} transactions written to ${path}`,
+      });
+    } catch (err: any) {
+      toast({
+        title: "Export failed",
         description: String(err?.message || err),
         variant: "destructive",
       });
@@ -133,10 +157,46 @@ export default function DatabaseSection() {
           fontSize: 11,
           color: "#9CA3AF",
           marginTop: 16,
+          marginBottom: 20,
         }}
       >
         Restoring a backup replaces your current data on next app launch.
       </p>
+
+      <div
+        style={{ borderTop: "1px solid #F3F4F6", paddingTop: 20 }}
+      >
+        <h3
+          style={{
+            fontFamily: "Inter",
+            fontSize: 15,
+            fontWeight: 500,
+            color: "#000",
+            marginBottom: 4,
+          }}
+        >
+          Export to spreadsheet
+        </h3>
+        <p
+          style={{
+            fontFamily: "Inter",
+            fontSize: 13,
+            color: "#6B7280",
+            marginBottom: 12,
+          }}
+        >
+          Save all your transactions as a CSV file you can open in Excel or
+          Numbers.
+        </p>
+        <Button
+          onClick={handleExportCsv}
+          disabled={busy !== null}
+          variant="outline"
+        >
+          <FileSpreadsheet className="w-4 h-4 mr-2" />
+          {busy === "csv" ? "Exporting…" : "Export transactions to CSV…"}
+        </Button>
+      </div>
     </div>
   );
 }

@@ -10,7 +10,6 @@ import Sidebar from "@/components/layout/sidebar";
 const BudgetPage = lazy(() => import("@/pages/budget"));
 const OverviewPage = lazy(() => import("@/pages/overview-redesigned"));
 const SettingsPage = lazy(() => import("@/pages/settings"));
-const GuidesPage = lazy(() => import("@/pages/test-library"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 
 const PageLoader = () => (
@@ -25,7 +24,6 @@ function Router() {
       <Switch>
         <Route path="/budget" component={BudgetPage} />
         <Route path="/overview" component={OverviewPage} />
-        <Route path="/guides" component={GuidesPage} />
         <Route path="/settings" component={SettingsPage} />
         <Route path="/">
           <Redirect to="/budget" />

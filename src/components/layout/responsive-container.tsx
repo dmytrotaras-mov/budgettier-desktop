@@ -1,8 +1,9 @@
-import { ReactNode } from "react";
+import { ReactNode, CSSProperties } from "react";
 
 interface ResponsiveContainerProps {
   children: ReactNode;
   className?: string;
+  style?: CSSProperties;
 }
 
 /**
@@ -12,7 +13,7 @@ interface ResponsiveContainerProps {
  * - Supports minimum width of 375px
  * - Custom breakpoint at 1300px for large padding
  */
-export default function ResponsiveContainer({ children, className = "" }: ResponsiveContainerProps) {
+export default function ResponsiveContainer({ children, className = "", style }: ResponsiveContainerProps) {
   return (
     <>
       <style>{`
@@ -37,7 +38,7 @@ export default function ResponsiveContainer({ children, className = "" }: Respon
           }
         }
       `}</style>
-      <div className={`responsive-container-custom ${className}`}>
+      <div className={`responsive-container-custom ${className}`} style={style}>
         {children}
       </div>
     </>

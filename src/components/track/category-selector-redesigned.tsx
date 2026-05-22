@@ -132,9 +132,10 @@ interface CategorySelectorProps {
   value: string;
   onValueChange: (value: string) => void;
   type: "expense" | "income";
+  disabled?: boolean;
 }
 
-export default function CategorySelector({ value, onValueChange, type }: CategorySelectorProps) {
+export default function CategorySelector({ value, onValueChange, type, disabled }: CategorySelectorProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [isOpen, setIsOpen] = useState(false);
 

@@ -158,6 +158,9 @@ interface TransactionListProps {
     start: Date;
     end: Date;
   };
+  showAddButton?: boolean;
+  onAddClick?: (date?: Date | null) => void;
+  planOnly?: boolean;
 }
 
 export default function TransactionList({ dateRange }: TransactionListProps) {

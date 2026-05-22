@@ -474,7 +474,11 @@ export default function TransactionEditDialog({ transaction, isOpen, onClose, on
                     const handleDateClick = () => {
                       // Trigger the native date picker
                       if (dateInputRef.current) {
-                        dateInputRef.current.showPicker?.() || dateInputRef.current.focus();
+                        if (dateInputRef.current.showPicker) {
+                          dateInputRef.current.showPicker();
+                        } else {
+                          dateInputRef.current.focus();
+                        }
                       }
                     };
 
@@ -892,7 +896,11 @@ export default function TransactionEditDialog({ transaction, isOpen, onClose, on
                 const handleDateClick = () => {
                   // Trigger the native date picker
                   if (dateInputRef.current) {
-                    dateInputRef.current.showPicker?.() || dateInputRef.current.focus();
+                    if (dateInputRef.current.showPicker) {
+                      dateInputRef.current.showPicker();
+                    } else {
+                      dateInputRef.current.focus();
+                    }
                   }
                 };
 

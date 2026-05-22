@@ -70,7 +70,7 @@ function renderExpandedPanel(panelId: string, data: any, formatCurrency: (amount
                       if (data.currentMonthProgression?.isCurrentMonth && props.payload.day === data.currentMonthProgression?.todayDay) {
                         return <circle cx={props.cx} cy={props.cy} r={4} fill="#ED4040" />;
                       }
-                      return null;
+                      return <circle key={props.key} cx={props.cx} cy={props.cy} r={0} fill="transparent" />;
                     }}
                     name="Current Month"
                     connectNulls={false}
@@ -835,7 +835,7 @@ export default function OverviewRedesignedPage() {
                             if (currentMonthProgression?.isCurrentMonth && props.payload.day === currentMonthProgression?.todayDay) {
                               return <circle cx={props.cx} cy={props.cy} r={4} fill="#ED4040" />;
                             }
-                            return null;
+                            return <circle key={props.key} cx={props.cx} cy={props.cy} r={0} fill="transparent" />;
                           }}
                           name="currentMonth"
                           connectNulls={false}

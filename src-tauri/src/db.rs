@@ -55,16 +55,59 @@ pub fn init(app: &AppHandle) -> Result<DbPool, String> {
         .get()
         .map_err(|e| format!("checkout for migration failed: {e}"))?;
     migrate(&conn).map_err(|e| format!("migration failed: {e}"))?;
+    recompute_all_balances(&conn)
+        .map_err(|e| format!("balance recompute failed: {e}"))?;
 
     Ok(pool)
 }
 
-/// Idempotent CREATE TABLE statements. Mirrors shared/schema.ts.
-/// Adding a new column? Bump this with `ALTER TABLE ... ADD COLUMN ...`
-/// guarded by a check on `pragma_table_info`. For now everything is fresh.
-fn migrate(conn: &Connection) -> rusqlite::Result<()> {
-    conn.execute_batch(
-        r#"
+/// Drift insurance: on every launch, re-derive each wallet's balance by summing
+/// its transactions. Cheap at our scale and guarantees displayed balances are
+/// always consistent with transaction history.
+fn recompute_all_balances(conn: &Connection) -> rusqlite::Result<()> {
+    let wallet_ids: Vec<String> = {
+        let mut stmt = conn.prepare("SELECT id FROM wallets")?;
+        let mapped = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        let collected: Result<Vec<_>, _> = mapped.collect();
+        collected?
+    };
+    for id in &wallet_ids {
+        let total: f64 = conn.query_row(
+            "SELECT COALESCE(SUM(
+                CASE
+                  WHEN type = 'income'   AND wallet_id = ?1       THEN  CAST(amount AS REAL)
+                  WHEN type = 'expense'  AND wallet_id = ?1       THEN -CAST(amount AS REAL)
+                  WHEN type = 'transfer' AND to_wallet_id = ?1    THEN  CAST(amount AS REAL)
+                  WHEN type = 'transfer' AND from_wallet_id = ?1  THEN -CAST(amount AS REAL)
+                  ELSE 0
+                END
+            ), 0) FROM transactions",
+            [id],
+            |r| r.get(0),
+        )?;
+        conn.execute(
+            "UPDATE wallets SET balance = ?1 WHERE id = ?2",
+            rusqlite::params![format!("{:.2}", total), id],
+        )?;
+    }
+    eprintln!("[db] recomputed {} wallet balance(s)", wallet_ids.len());
+    Ok(())
+}
+
+/// Ordered schema migrations. Each entry is one SQL batch.
+///
+/// The index in this array IS the version number (1-based). On launch we read
+/// `PRAGMA user_version`, then apply every migration whose version is greater,
+/// in order, and stamp `user_version` to the new total.
+///
+/// RULES for adding a migration:
+///   - NEVER edit or remove an existing entry — only append.
+///   - A migration must be safe to run against a database created by all
+///     previous migrations (use `ADD COLUMN`, `CREATE TABLE IF NOT EXISTS`,
+///     etc. — never destructive changes without a data-preserving plan).
+const MIGRATIONS: &[&str] = &[
+    // ---- v1: initial schema (mirrors shared/schema.ts) ----
+    r#"
         CREATE TABLE IF NOT EXISTS categories (
             id        TEXT PRIMARY KEY,
             name      TEXT NOT NULL,
@@ -146,6 +189,30 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             ON budget_category_allocations(budget_plan_id);
         CREATE INDEX IF NOT EXISTS idx_budget_allocations_category_id
             ON budget_category_allocations(category_id);
-        "#,
-    )
+    "#,
+    // ---- v2: (next schema change goes here — append, never edit above) ----
+];
+
+/// Apply any migrations newer than the database's current `user_version`.
+fn migrate(conn: &Connection) -> rusqlite::Result<()> {
+    let current: i64 =
+        conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    let target = MIGRATIONS.len() as i64;
+
+    if current >= target {
+        eprintln!("[db] schema up to date (v{current})");
+        return Ok(());
+    }
+    eprintln!("[db] migrating schema v{current} -> v{target}");
+
+    for (idx, sql) in MIGRATIONS.iter().enumerate() {
+        let version = (idx + 1) as i64;
+        if version > current {
+            eprintln!("[db]   applying migration v{version}");
+            conn.execute_batch(sql)?;
+        }
+    }
+    // PRAGMA user_version can't be parameterized — interpolate the integer.
+    conn.execute_batch(&format!("PRAGMA user_version = {target};"))?;
+    Ok(())
 }

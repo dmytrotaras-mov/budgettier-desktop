@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
-import { Wallet, BarChart3, Settings, User, LogOut, BookOpen, Sparkles, Lightbulb, PanelLeft } from "lucide-react";
+import { Wallet, BarChart3, Settings, User, LogOut, Sparkles, Lightbulb, PanelLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { type User as UserType } from "@shared/schema";
@@ -25,7 +25,6 @@ import StartingBalanceDialog from "@/components/wallets/starting-balance-dialog"
 const navigation = [
   { name: "Budget", href: "/budget", icon: Wallet },
   { name: "Overview", href: "/overview", icon: BarChart3 },
-  { name: "Guides", href: "/guides", icon: BookOpen },
   { name: "Settings", href: "/settings", icon: Settings },
 ];
 

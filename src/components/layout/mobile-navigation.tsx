@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { Wallet, BarChart3, Settings, User, BookOpen } from "lucide-react";
+import { Wallet, BarChart3, Settings, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { type User as UserType } from "@shared/schema";
@@ -7,7 +7,6 @@ import { type User as UserType } from "@shared/schema";
 const navigation = [
   { name: "Budget", href: "/budget", icon: Wallet },
   { name: "Overview", href: "/overview", icon: BarChart3 },
-  { name: "Guides", href: "/guides", icon: BookOpen },
   { name: "Settings", href: "/settings", icon: Settings },
 ];
 

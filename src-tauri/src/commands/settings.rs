@@ -3,7 +3,7 @@
 
 use crate::db::DbPool;
 use rusqlite::{params, Row};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
 use tauri::State;
 use uuid::Uuid;
@@ -69,9 +69,6 @@ pub fn get_settings(pool: State<DbPool>) -> Result<Settings, String> {
         .map_err(|e| e.to_string())?;
     Ok(s)
 }
-
-#[derive(Debug, Deserialize)]
-pub struct SettingsPatch(pub Value);
 
 #[tauri::command]
 pub fn update_settings(pool: State<DbPool>, input: Value) -> Result<Settings, String> {

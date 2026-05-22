@@ -724,7 +724,11 @@ export default function TransactionForm({ onSuccess, initialDate }: TransactionF
               const handleDateClick = () => {
                 // Trigger the native date picker
                 if (dateInputRef.current) {
-                  dateInputRef.current.showPicker?.() || dateInputRef.current.focus();
+                  if (dateInputRef.current.showPicker) {
+                    dateInputRef.current.showPicker();
+                  } else {
+                    dateInputRef.current.focus();
+                  }
                 }
               };
 

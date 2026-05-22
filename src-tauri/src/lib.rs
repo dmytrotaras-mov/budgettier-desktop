@@ -43,6 +43,7 @@ pub fn run() {
             commands::budgets::get_current_month_allocations,
             commands::backup::backup_db,
             commands::backup::restore_db,
+            commands::backup::export_csv,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

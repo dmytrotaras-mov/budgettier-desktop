@@ -12,7 +12,7 @@
 use tauri::menu::{
     AboutMetadataBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder,
 };
-use tauri::{App, Emitter, Manager};
+use tauri::{App, Emitter};
 
 pub const PREFERENCES_EVENT: &str = "menu:preferences";
 
