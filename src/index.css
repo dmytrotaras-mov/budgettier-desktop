@@ -1,0 +1,339 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Mobile Browser Compatibility Fixes */
+
+/* Safari/Chrome: Fix viewport height for mobile browsers with address bars */
+:root {
+  --vh: 1vh;
+}
+
+/* Responsive font scaling */
+html {
+  /* Mobile: 85% of base size */
+  font-size: 85%;
+  /* Prevent white overscroll background on landing page */
+  background-color: #F3F4F6;
+  /* Safari: Fix position:fixed elements */
+  -webkit-text-size-adjust: 100%;
+  /* Safari: Enable smooth scrolling */
+  -webkit-overflow-scrolling: touch;
+}
+
+body {
+  background-color: #F3F4F6;
+  /* Safari: Fix for rubber band effect */
+  overscroll-behavior-y: none;
+  /* Safari: Support for safe area insets (notch) */
+  padding-top: env(safe-area-inset-top);
+  /* Don't add bottom padding to body - it's handled by fixed navigation */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  /* iOS PWA: Prevent text selection on long press */
+  -webkit-user-select: none;
+  user-select: none;
+  /* iOS PWA: Prevent callout menu on long press */
+  -webkit-touch-callout: none;
+  /* iOS PWA: Fix viewport height for fixed positioning */
+  min-height: 100vh;
+  min-height: -webkit-fill-available;
+}
+
+/* Allow text selection in input fields and content areas */
+input, textarea, [contenteditable], p, span, div[role="textbox"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Mobile input field optimizations */
+input, textarea, select {
+  /* Prevent iOS zoom on focus by ensuring font size is at least 16px */
+  font-size: max(16px, 1em);
+  /* Remove iOS input shadows and styling */
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  /* Improve touch targets */
+  min-height: 44px;
+}
+
+/* Prevent iOS from adding default styling to inputs */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+input[type="tel"],
+input[type="url"],
+input[type="search"],
+input[type="date"],
+textarea {
+  border-radius: 0;
+  -webkit-border-radius: 0;
+}
+
+/* Remove iOS inner shadow on inputs */
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  -webkit-appearance: none;
+}
+
+/* iOS PWA: Improve tap highlighting */
+* {
+  -webkit-tap-highlight-color: rgba(0, 0, 0, 0.05);
+}
+
+/* iOS PWA: Remove tap highlight on buttons */
+button, a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Mobile: Add padding for fixed bottom navigation */
+@media (max-width: 767px) {
+  #root {
+    padding-bottom: calc(64px + env(safe-area-inset-bottom));
+  }
+
+  /* Ensure mobile navigation is always visible and on top */
+  .mobile-bottom-nav {
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    z-index: 9999 !important;
+    transform: none !important;
+    -webkit-transform: none !important;
+  }
+
+  /* Hide mobile bottom navigation when dialog/modal is open */
+  body:has([role="dialog"]) .mobile-bottom-nav {
+    display: none !important;
+  }
+}
+
+@media (min-width: 768px) {
+  html {
+    /* Tablet: 90% of base size */
+    font-size: 90%;
+  }
+}
+
+@media (min-width: 1300px) {
+  html {
+    /* Desktop: 100% (base size) */
+    font-size: 100%;
+  }
+}
+
+/* Stats boxes responsive layout */
+@media (max-width: 767px) {
+  .stat-box {
+    flex-basis: calc(50% - 10px) !important;
+  }
+}
+
+:root {
+  --background: hsl(0, 0%, 100%);
+  --foreground: hsl(210, 25%, 7.8431%);
+  --card: hsl(180, 6.6667%, 97.0588%);
+  --card-foreground: hsl(210, 25%, 7.8431%);
+  --popover: hsl(0, 0%, 100%);
+  --popover-foreground: hsl(210, 25%, 7.8431%);
+  --primary: hsl(0, 0%, 0%);
+  --primary-foreground: hsl(0, 0%, 100%);
+  --secondary: hsl(210, 25%, 7.8431%);
+  --secondary-foreground: hsl(0, 0%, 100%);
+  --muted: hsl(240, 1.9608%, 90%);
+  --muted-foreground: hsl(210, 25%, 7.8431%);
+  --accent: hsl(211.5789, 51.3514%, 92.7451%);
+  --accent-foreground: hsl(203.8863, 88.2845%, 53.1373%);
+  --destructive: hsl(356.3033, 90.5579%, 54.3137%);
+  --destructive-foreground: hsl(0, 0%, 100%);
+  --border: hsl(214, 13%, 91%);
+  --input: hsl(200, 23.0769%, 97.4510%);
+  --ring: hsl(0, 0%, 0%);
+  --mono-white: hsl(0, 0%, 100%);
+  --mono-gray-50: hsl(210, 17%, 98%);
+  --mono-gray-100: hsl(220, 14%, 96%);
+  --mono-gray-400: hsl(215, 16%, 47%);
+  --mono-gray-600: hsl(215, 19%, 35%);
+  --mono-gray-700: hsl(215, 25%, 27%);
+  --mono-gray-900: hsl(224, 71%, 4%);
+  --mono-black: hsl(0, 0%, 0%);
+  --font-sans: Inter, sans-serif;
+  --font-serif: Georgia, serif;
+  --font-mono: Menlo, monospace;
+  --radius: 0.5rem;
+}
+
+.dark {
+  --background: hsl(0, 0%, 0%);
+  --foreground: hsl(200, 6.6667%, 91.1765%);
+  --card: hsl(228, 9.8039%, 10%);
+  --card-foreground: hsl(0, 0%, 85.0980%);
+  --popover: hsl(0, 0%, 0%);
+  --popover-foreground: hsl(200, 6.6667%, 91.1765%);
+  --primary: hsl(0, 0%, 100%);
+  --primary-foreground: hsl(0, 0%, 0%);
+  --secondary: hsl(195.0000, 15.3846%, 94.9020%);
+  --secondary-foreground: hsl(210, 25%, 7.8431%);
+  --muted: hsl(0, 0%, 9.4118%);
+  --muted-foreground: hsl(210, 3.3898%, 46.2745%);
+  --accent: hsl(205.7143, 70%, 7.8431%);
+  --accent-foreground: hsl(203.7736, 87.6033%, 52.5490%);
+  --destructive: hsl(356.3033, 90.5579%, 54.3137%);
+  --destructive-foreground: hsl(0, 0%, 100%);
+  --border: hsl(210, 5.2632%, 14.9020%);
+  --input: hsl(207.6923, 27.6596%, 18.4314%);
+  --ring: hsl(0, 0%, 100%);
+  --mono-white: hsl(0, 0%, 0%);
+  --mono-gray-50: hsl(228, 9.8039%, 10%);
+  --mono-gray-100: hsl(210, 5.2632%, 14.9020%);
+  --mono-gray-400: hsl(215, 16%, 47%);
+  --mono-gray-600: hsl(215, 19%, 65%);
+  --mono-gray-700: hsl(215, 25%, 73%);
+  --mono-gray-900: hsl(0, 0%, 95%);
+  --mono-black: hsl(0, 0%, 100%);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply font-sans antialiased bg-background text-foreground;
+    font-family: var(--font-sans);
+  }
+}
+
+@layer utilities {
+  /* Bottom sheet slide-up animation */
+  @keyframes slide-up {
+    from {
+      transform: translateY(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+
+  .animate-slide-up {
+    animation: slide-up 0.3s ease-out forwards;
+  }
+
+  @keyframes slide-down {
+    from {
+      transform: translateY(0);
+      opacity: 1;
+    }
+    to {
+      transform: translateY(100%);
+      opacity: 0;
+    }
+  }
+
+  .animate-slide-down {
+    animation: slide-down 0.3s ease-out forwards;
+  }
+
+  .mono-white {
+    color: var(--mono-white);
+  }
+  
+  .mono-gray-50 {
+    color: var(--mono-gray-50);
+  }
+  
+  .mono-gray-100 {
+    color: var(--mono-gray-100);
+  }
+  
+  .mono-gray-400 {
+    color: var(--mono-gray-400);
+  }
+  
+  .mono-gray-600 {
+    color: var(--mono-gray-600);
+  }
+  
+  .mono-gray-700 {
+    color: var(--mono-gray-700);
+  }
+  
+  .mono-gray-900 {
+    color: var(--mono-gray-900);
+  }
+  
+  .mono-black {
+    color: var(--mono-black);
+  }
+  
+  .bg-mono-white {
+    background-color: var(--mono-white);
+  }
+  
+  .bg-mono-gray-50 {
+    background-color: var(--mono-gray-50);
+  }
+  
+  .bg-mono-gray-100 {
+    background-color: var(--mono-gray-100);
+  }
+  
+  .bg-mono-gray-400 {
+    background-color: var(--mono-gray-400);
+  }
+  
+  .bg-mono-gray-600 {
+    background-color: var(--mono-gray-600);
+  }
+  
+  .bg-mono-gray-700 {
+    background-color: var(--mono-gray-700);
+  }
+  
+  .bg-mono-gray-900 {
+    background-color: var(--mono-gray-900);
+  }
+  
+  .bg-mono-black {
+    background-color: var(--mono-black);
+  }
+  
+  .border-mono-white {
+    border-color: var(--mono-white);
+  }
+  
+  .border-mono-gray-50 {
+    border-color: var(--mono-gray-50);
+  }
+  
+  .border-mono-gray-100 {
+    border-color: var(--mono-gray-100);
+  }
+  
+  .border-mono-gray-400 {
+    border-color: var(--mono-gray-400);
+  }
+  
+  .border-mono-gray-600 {
+    border-color: var(--mono-gray-600);
+  }
+  
+  .border-mono-gray-700 {
+    border-color: var(--mono-gray-700);
+  }
+  
+  .border-mono-gray-900 {
+    border-color: var(--mono-gray-900);
+  }
+  
+  .border-mono-black {
+    border-color: var(--mono-black);
+  }
+}

@@ -1,0 +1,27 @@
+[package]
+name = "budgettier-desktop"
+version = "0.1.0"
+description = "Budgettier — local-first personal finance tracker"
+authors = ["Budgettier"]
+edition = "2021"
+
+[lib]
+name = "budgettier_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Bundled SQLite — no system libsqlite needed, ships inside the binary.
+rusqlite = { version = "0.32", features = ["bundled"] }
+# Thread-safe shared connection pool. r2d2 wraps rusqlite for use across Tauri commands.
+r2d2 = "0.8"
+r2d2_sqlite = "0.25"
+uuid = { version = "1", features = ["v4"] }
+thiserror = "2"
