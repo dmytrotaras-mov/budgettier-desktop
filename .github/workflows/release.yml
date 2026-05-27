@@ -62,6 +62,9 @@ jobs:
           releaseBody: "See the assets below to download and install Budgettier."
           releaseDraft: false
           prerelease: false
-          # tauri-action generates latest.json automatically when the updater
-          # is configured, and uploads it to the release.
+          # Generate latest.json (the manifest the in-app updater reads) and
+          # attach it to the release alongside the DMG + signed .tar.gz.
+          # Without this flag, only DMG/app bundles are uploaded and the
+          # updater has no manifest to fetch.
+          includeUpdaterJson: true
           updaterJsonPreferNsis: false
