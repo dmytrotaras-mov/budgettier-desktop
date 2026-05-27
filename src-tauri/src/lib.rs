@@ -46,6 +46,10 @@ pub fn run() {
             commands::backup::backup_db,
             commands::backup::restore_db,
             commands::backup::export_csv,
+            commands::category_rules::get_category_rules,
+            commands::category_rules::create_category_rule,
+            commands::category_rules::delete_category_rule,
+            commands::category_rules::suggest_category,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

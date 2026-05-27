@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -132,6 +133,31 @@ export default function TransactionForm({ onSuccess, initialDate }: TransactionF
       }
     }
   }, [settings, wallets, form]);
+
+  // Auto-categorization: when user types a description, suggest a category
+  // by matching against the auto-categorization rules table. Only fills if
+  // the user hasn't already picked a category manually.
+  const description = form.watch("description");
+  const txType = form.watch("type");
+  useEffect(() => {
+    if (!description || description.trim().length < 3) return;
+    if (txType === "transfer") return;
+    if (form.getValues("categoryId")) return; // user already picked one
+    const timer = setTimeout(async () => {
+      try {
+        const suggested = await invoke<string | null>("suggest_category", {
+          description,
+        });
+        // Re-check at fire time — user may have picked during the debounce.
+        if (suggested && !form.getValues("categoryId")) {
+          form.setValue("categoryId", suggested);
+        }
+      } catch {
+        // Silent — auto-suggest is best-effort.
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [description, txType, form]);
 
   const createTransactionMutation = useMutation({
     mutationFn: async (data: FormData) => {

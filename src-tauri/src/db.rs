@@ -57,6 +57,8 @@ pub fn init(app: &AppHandle) -> Result<DbPool, String> {
     migrate(&conn).map_err(|e| format!("migration failed: {e}"))?;
     recompute_all_balances(&conn)
         .map_err(|e| format!("balance recompute failed: {e}"))?;
+    crate::commands::category_rules::seed_default_rules_if_empty(&conn)
+        .map_err(|e| format!("rule seed failed: {e}"))?;
 
     Ok(pool)
 }
@@ -190,7 +192,16 @@ const MIGRATIONS: &[&str] = &[
         CREATE INDEX IF NOT EXISTS idx_budget_allocations_category_id
             ON budget_category_allocations(category_id);
     "#,
-    // ---- v2: (next schema change goes here — append, never edit above) ----
+    // ---- v2: category_rules (auto-categorization by merchant substring) ----
+    r#"
+        CREATE TABLE IF NOT EXISTS category_rules (
+            id          TEXT PRIMARY KEY,
+            pattern     TEXT NOT NULL,
+            category_id TEXT NOT NULL REFERENCES categories(id),
+            created_at  INTEGER DEFAULT (unixepoch() * 1000)
+        );
+        CREATE INDEX IF NOT EXISTS idx_category_rules_pattern ON category_rules(pattern);
+    "#,
 ];
 
 /// Apply any migrations newer than the database's current `user_version`.

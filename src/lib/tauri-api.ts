@@ -100,6 +100,14 @@ export async function callBackend(
       break;
     }
 
+    // ---- category-rules ----
+    case "category-rules": {
+      if (method === "GET" && !a) return invoke("get_category_rules");
+      if (method === "POST" && !a) return invoke("create_category_rule", { input: body });
+      if (method === "DELETE" && a) return invoke("delete_category_rule", { id: a });
+      break;
+    }
+
     // ---- budget allocations ----
     case "budget-allocations": {
       // /api/budget-allocations/current-month

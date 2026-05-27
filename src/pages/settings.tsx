@@ -21,7 +21,8 @@ import CategoryGroups from "@/components/settings/category-groups";
 import StartingBalanceDialog from "@/components/wallets/starting-balance-dialog";
 import ResponsiveContainer from "@/components/layout/responsive-container";
 import DatabaseSection from "@/components/settings/database-section";
-import { Database } from "lucide-react";
+import AutoCategorizationSection from "@/components/settings/auto-categorization";
+import { Database, Sparkles } from "lucide-react";
 
 // Form schemas
 const walletFormSchema = z.object({
@@ -334,6 +335,7 @@ export default function SettingsRedesignedPage() {
     { id: "categories", label: "Categories", icon: Tags },
     { id: "notifications", label: "Notifications", icon: Bell },
     { id: "database", label: "Database", icon: Database },
+    { id: "rules", label: "Auto-categorize", icon: Sparkles },
   ];
 
   const renderTabContent = () => {
@@ -922,6 +924,13 @@ export default function SettingsRedesignedPage() {
         return (
           <div className="space-y-4">
             <DatabaseSection />
+          </div>
+        );
+
+      case "rules":
+        return (
+          <div className="space-y-4">
+            <AutoCategorizationSection />
           </div>
         );
 
