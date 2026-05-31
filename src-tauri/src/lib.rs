@@ -50,6 +50,8 @@ pub fn run() {
             commands::category_rules::create_category_rule,
             commands::category_rules::delete_category_rule,
             commands::category_rules::suggest_category,
+            commands::import_wise::preview_wise_csv,
+            commands::import_wise::import_wise_csv,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

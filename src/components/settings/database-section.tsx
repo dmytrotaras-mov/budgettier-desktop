@@ -8,11 +8,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { save, open, message } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { Download, Upload, FileSpreadsheet } from "lucide-react";
+import { Download, Upload, FileSpreadsheet, FileUp } from "lucide-react";
+import ImportWiseDialog from "./import-wise-dialog";
 
 export default function DatabaseSection() {
   const { toast } = useToast();
   const [busy, setBusy] = useState<"backup" | "restore" | "csv" | null>(null);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -197,6 +199,42 @@ export default function DatabaseSection() {
           {busy === "csv" ? "Exporting…" : "Export transactions to CSV…"}
         </Button>
       </div>
+
+      {/* Import from Wise */}
+      <div style={{ borderTop: "1px solid #F3F4F6", paddingTop: 20, marginTop: 20 }}>
+        <h3
+          style={{
+            fontFamily: "Inter",
+            fontSize: 15,
+            fontWeight: 500,
+            color: "#000",
+            marginBottom: 4,
+          }}
+        >
+          Import from bank statement
+        </h3>
+        <p
+          style={{
+            fontFamily: "Inter",
+            fontSize: 13,
+            color: "#6B7280",
+            marginBottom: 12,
+          }}
+        >
+          Pull transactions from a Wise CSV statement. Duplicates and
+          pre-authorization pairs are detected automatically. Categories are
+          suggested using your auto-categorization rules.
+        </p>
+        <Button onClick={() => setImportDialogOpen(true)} variant="outline">
+          <FileUp className="w-4 h-4 mr-2" />
+          Import from CSV (Wise)…
+        </Button>
+      </div>
+
+      <ImportWiseDialog
+        open={importDialogOpen}
+        onClose={() => setImportDialogOpen(false)}
+      />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 [package]
 name = "budgettier-desktop"
-version = "0.1.4"
+version = "0.2.0"
 description = "Budgettier — local-first personal finance tracker"
 authors = ["Budgettier"]
 edition = "2021"

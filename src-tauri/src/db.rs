@@ -202,6 +202,13 @@ const MIGRATIONS: &[&str] = &[
         );
         CREATE INDEX IF NOT EXISTS idx_category_rules_pattern ON category_rules(pattern);
     "#,
+    // ---- v3: external_id on transactions (CSV import dedup) ----
+    // ALTER TABLE ADD COLUMN is non-destructive — keeps user data intact.
+    r#"
+        ALTER TABLE transactions ADD COLUMN external_id TEXT;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_external_id
+            ON transactions(external_id) WHERE external_id IS NOT NULL;
+    "#,
 ];
 
 /// Apply any migrations newer than the database's current `user_version`.
