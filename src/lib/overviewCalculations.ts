@@ -51,9 +51,16 @@ export function calculateYearOverview(transactions: any[], selectedDate: Date, c
 }
 
 // Calculate Years Progress
+// Only includes years where transactions actually exist. The selected year is
+// always included even if empty (so the user still sees their current period).
 export function calculateYearsProgress(transactions: any[], selectedYear: number, currentWalletBalance: number = 0) {
-  const years: number[] = [];
-  for (let i = 4; i >= 0; i--) years.push(selectedYear - i);
+  // Discover which years have any transaction data at all.
+  const yearsWithData = new Set<number>();
+  for (const t of transactions) {
+    yearsWithData.add(new Date(t.date).getFullYear());
+  }
+  yearsWithData.add(selectedYear);
+  const years = Array.from(yearsWithData).sort((a, b) => a - b);
 
   return years.map(year => {
     const yearStart = new Date(year, 0, 1);
@@ -106,6 +113,7 @@ export function calculateCurrentMonthProgression(transactions: any[], selectedDa
   // Build historical averages from previous 6 months
   const previousMonthsData: number[][] = [];
   for (let day = 0; day <= 31; day++) previousMonthsData[day] = [];
+  let monthsWithData = 0;
 
   for (let monthOffset = 1; monthOffset <= 6; monthOffset++) {
     const monthStart = startOfMonth(subMonths(now, monthOffset));
@@ -122,6 +130,7 @@ export function calculateCurrentMonthProgression(transactions: any[], selectedDa
     }
 
     if (!hasData) continue;
+    monthsWithData += 1;
 
     let cumulativeHistorical = 0;
     for (let day = 1; day <= 31; day++) {
@@ -130,6 +139,11 @@ export function calculateCurrentMonthProgression(transactions: any[], selectedDa
     }
   }
 
+  // Average is statistically useless if we have less than 3 months of history.
+  // We compute it anyway for backwards compat but flag the caller so the UI
+  // can skip the line altogether.
+  const hasEnoughAverageData = monthsWithData >= 3;
+
   // Calculate averages
   const averageDaily: number[] = new Array(32).fill(0);
   for (let day = 1; day <= 31; day++) {
@@ -137,70 +151,31 @@ export function calculateCurrentMonthProgression(transactions: any[], selectedDa
     averageDaily[day] = data.length > 0 ? data.reduce((sum, val) => sum + val, 0) / data.length : 0;
   }
 
-  // Build chart data
-  const chartData: { day: number; currentMonth?: number; average: number }[] = [];
+  // Build chart data. Omit `average` field entirely if data is too thin —
+  // recharts will then not render the line.
+  const chartData: { day: number; currentMonth?: number; average?: number }[] = [];
   let cumulativeCurrent = 0;
 
   for (let day = 1; day <= daysInMonth; day++) {
     cumulativeCurrent += currentMonthDaily[day];
-    const dataPoint: { day: number; currentMonth?: number; average: number } = {
-      day,
-      average: averageDaily[day] || 0
-    };
-
+    const dataPoint: { day: number; currentMonth?: number; average?: number } = { day };
+    if (hasEnoughAverageData) {
+      dataPoint.average = averageDaily[day] || 0;
+    }
     if (!isFutureMonth && day <= today) {
       dataPoint.currentMonth = cumulativeCurrent;
     }
-
     chartData.push(dataPoint);
   }
 
-  return { chartData, totalSpent: cumulativeCurrent, isCurrentMonth, todayDay: isCurrentMonth ? today : null };
-}
-
-// Category icon helper
-export function getCategoryIcon(categoryName: string): string {
-  const iconMap: Record<string, string> = {
-    'Rent/Mortgage': '🏠', 'Groceries': '🛒', 'Restaurants/Cafes': '🍽️',
-    'Transportation': '🚗', 'Entertainment': '🎬', 'Shopping': '🛍️',
-    'Healthcare': '🏥', 'Utilities': '⚡', 'Travel': '✈️',
-    'Education': '📚', 'Miscellaneous': '📦', 'Other': '📦'
+  return {
+    chartData,
+    totalSpent: cumulativeCurrent,
+    isCurrentMonth,
+    todayDay: isCurrentMonth ? today : null,
+    hasEnoughAverageData,
+    monthsWithHistory: monthsWithData,
   };
-  return iconMap[categoryName] || '💰';
-}
-
-// Default section mapping for categories
-export function getDefaultSection(categoryName: string): string {
-  const sectionMap: Record<string, string> = {
-    'Rent/Mortgage': 'Housing & Utilities',
-    'Electricity': 'Housing & Utilities',
-    'Water': 'Housing & Utilities',
-    'Gas/Heating': 'Housing & Utilities',
-    'Internet/Phone': 'Housing & Utilities',
-    'Groceries': 'Food & Drinks',
-    'Restaurants/Cafes': 'Food & Drinks',
-    'Food Delivery': 'Food & Drinks',
-    'Public Transport': 'Transportation',
-    'Fuel/Gas': 'Transportation',
-    'Taxi/Ride Sharing': 'Transportation',
-    'Car Maintenance': 'Transportation',
-    'Health Insurance': 'Health & Wellness',
-    'Doctor/Dentist': 'Health & Wellness',
-    'Medications': 'Health & Wellness',
-    'Gym/Fitness': 'Health & Wellness',
-    'Clothing': 'Shopping',
-    'Electronics': 'Shopping',
-    'Home Goods': 'Shopping',
-    'Movies/Concerts': 'Entertainment',
-    'Streaming Services': 'Entertainment',
-    'Hobbies': 'Entertainment',
-    'Books/Education': 'Education & Other',
-    'Courses/Training': 'Education & Other',
-    'Gifts': 'Education & Other',
-    'Charity': 'Education & Other',
-    'Miscellaneous': 'Education & Other',
-  };
-  return sectionMap[categoryName] || 'Other';
 }
 
 export function getExpandedPanelTitle(panelId: string | null): string {

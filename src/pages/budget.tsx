@@ -384,7 +384,7 @@ export default function BudgetPage() {
           {/* Transaction Panel - Always visible on desktop, conditionally on mobile */}
           <div
             className={`${mobilePanelView === 'transactions' ? 'block' : 'hidden md:block'} mobile-panel-wrapper-transactions`}
-            style={{ flex: 1, minHeight: 0, height: '100%' }}
+            style={{ flex: '1 1 0', minHeight: 0, minWidth: 0, height: '100%' }}
           >
             <BudgetTransactionPanel
               dateRange={dateRange}
@@ -396,7 +396,7 @@ export default function BudgetPage() {
           {/* Plan Budget Panel - Always visible on desktop, conditionally on mobile */}
           <div
             className={`${mobilePanelView === 'budget' ? 'block' : 'hidden md:block'} mobile-panel-wrapper-budget`}
-            style={{ flex: 1, minHeight: 0, height: '100%' }}
+            style={{ flex: '1 1 0', minHeight: 0, minWidth: 0, height: '100%' }}
           >
             <BudgetPlanPanel
               dateRange={dateRange}

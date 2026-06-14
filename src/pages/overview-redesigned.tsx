@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer as RechartsResponsiveContainer } from "recharts";
+import { LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer as RechartsResponsiveContainer } from "recharts";
 import { Checkbox } from "@/components/ui/checkbox";
 import { TrendingUp, TrendingDown, Wallet, ChevronLeft, ChevronRight, Expand, PiggyBank, ChevronDown, Check } from "lucide-react";
 import { format, startOfMonth, endOfMonth, addMonths, subMonths } from "date-fns";
@@ -13,7 +13,6 @@ import {
   calculateYearOverview,
   calculateYearsProgress,
   calculateCurrentMonthProgression,
-  getDefaultSection,
   getExpandedPanelTitle,
 } from "@/lib/overviewCalculations";
 
@@ -344,6 +343,7 @@ export default function OverviewRedesignedPage() {
   const [expandedPanel, setExpandedPanel] = useState<string | null>(null);
   const [healthPanelMode, setHealthPanelMode] = useState<"savings" | "budget">("savings");
   const [categoryViewMode, setCategoryViewMode] = useState<"categories" | "head-categories">("categories");
+  const [categoryFlowMode, setCategoryFlowMode] = useState<"expense" | "income">("expense");
   const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
   const [modalCategoryDropdownOpen, setModalCategoryDropdownOpen] = useState(false);
 
@@ -423,7 +423,7 @@ export default function OverviewRedesignedPage() {
   const categorySpending = useMemo(() => {
     const acc: Record<string, { name: string; emoji: string; amount: number }> = {};
     for (const t of transactionsArray) {
-      if (t.type !== "expense" || t.excludeFromBudget) continue;
+      if (t.type !== categoryFlowMode || t.excludeFromBudget) continue;
       const category = categoryMap.get(t.categoryId);
       const categoryId = category?.id || "other";
 
@@ -437,7 +437,7 @@ export default function OverviewRedesignedPage() {
       acc[categoryId].amount += parseFloat(t.amount);
     }
     return acc;
-  }, [transactionsArray, categoryMap]);
+  }, [transactionsArray, categoryMap, categoryFlowMode]);
 
   const COLORS = ["#3B82F6", "#10B981", "#EF4444", "#F97316", "#8B5CF6", "#06B6D4", "#EC4899", "#EAB308", "#6366F1"];
 
@@ -457,16 +457,18 @@ export default function OverviewRedesignedPage() {
   const headCategoryArray = useMemo(() => {
     const acc: Record<string, { name: string; amount: number; emoji: string; categories: string[] }> = {};
     for (const t of transactionsArray) {
-      if (t.type !== "expense" || t.excludeFromBudget) continue;
+      if (t.type !== categoryFlowMode || t.excludeFromBudget) continue;
       const category = categoryMap.get(t.categoryId);
       const categoryName = category?.name || "Other";
-      const section = category?.section || getDefaultSection(categoryName);
+      // Use the section the user actually set in their categories. No hardcoded
+      // fallback — categories without a section go to a single 'Other' bucket.
+      const section = category?.section || "Other";
 
       if (!acc[section]) {
         acc[section] = {
           name: section,
           amount: 0,
-          emoji: getSectionEmojiFromStorage(section, "expense"),
+          emoji: getSectionEmojiFromStorage(section, categoryFlowMode),
           categories: []
         };
       }
@@ -485,7 +487,7 @@ export default function OverviewRedesignedPage() {
         fill: COLORS[index % COLORS.length]
       }))
       .sort((a, b) => b.amount - a.amount);
-  }, [transactionsArray, categoryMap]);
+  }, [transactionsArray, categoryMap, categoryFlowMode]);
 
   const displayCategoryData = categoryViewMode === "head-categories" ? headCategoryArray : categoryData;
 
@@ -701,9 +703,16 @@ export default function OverviewRedesignedPage() {
             {/* Panel 1: Year Financial Overview */}
             <div className="bg-white overflow-hidden overview-panel" style={{ aspectRatio: '525 / 310.5', borderRadius: '20px', display: 'flex', flexDirection: 'column' }}>
               <div style={{ padding: '15px 20px', borderBottom: '1px solid #F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <h2 style={{ fontFamily: 'Inter', fontSize: '24px', fontWeight: 500, color: '#000' }}>
-                  Year
-                </h2>
+                <div>
+                  <h2 style={{ fontFamily: 'Inter', fontSize: '24px', fontWeight: 500, color: '#000' }}>
+                    Year
+                  </h2>
+                  {viewMode === "month" && (
+                    <p style={{ fontFamily: 'Inter', fontSize: '11px', color: '#9CA3AF', marginTop: 2 }}>
+                      {format(selectedDate, 'MMM yyyy')} highlighted
+                    </p>
+                  )}
+                </div>
                 <button
                   onClick={() => setExpandedPanel('year-budget')}
                   style={{
@@ -755,6 +764,15 @@ export default function OverviewRedesignedPage() {
                       }}
                       formatter={(value: any) => [formatCurrency(Number(value)), '']}
                     />
+                    {/* Vertical line marking the user's currently-selected month */}
+                    {viewMode === "month" && (
+                      <ReferenceLine
+                        x={format(selectedDate, 'MMM')}
+                        stroke="#9CA3AF"
+                        strokeDasharray="4 4"
+                        ifOverflow="extendDomain"
+                      />
+                    )}
                     {chartDataVisibility.income && <Line type="monotone" dataKey="income" stroke="#10b981" strokeWidth={2.5} dot={{ fill: "#10b981", r: 4 }} name="Income" />}
                     {chartDataVisibility.expenses && <Line type="monotone" dataKey="expenses" stroke="#ef4444" strokeWidth={2.5} dot={{ fill: "#ef4444", r: 4 }} name="Expenses" />}
                     {chartDataVisibility.savings && <Line type="monotone" dataKey="savings" stroke="#f59e0b" strokeWidth={2.5} dot={{ fill: "#f59e0b", r: 4 }} name="Savings" />}
@@ -896,6 +914,48 @@ export default function OverviewRedesignedPage() {
                     </div>
                   )}
                 </div>
+
+                {/* Expense / Income toggle */}
+                <div className="flex items-center gap-2">
+                  <div className="flex" style={{ marginRight: '8px' }}>
+                    <button
+                      onClick={() => setCategoryFlowMode("expense")}
+                      style={{
+                        height: '36px',
+                        backgroundColor: categoryFlowMode === "expense" ? '#F3F4F6' : '#fff',
+                        border: '1px solid #F3F4F6',
+                        borderRadius: '30px 0 0 30px',
+                        fontFamily: 'Inter',
+                        fontSize: '12px',
+                        fontWeight: 500,
+                        color: '#000',
+                        padding: '0 14px',
+                        cursor: 'pointer'
+                      }}
+                      className="hover:bg-gray-50"
+                    >
+                      Expense
+                    </button>
+                    <button
+                      onClick={() => setCategoryFlowMode("income")}
+                      style={{
+                        height: '36px',
+                        backgroundColor: categoryFlowMode === "income" ? '#F3F4F6' : '#fff',
+                        border: '1px solid #F3F4F6',
+                        borderLeft: 'none',
+                        borderRadius: '0 30px 30px 0',
+                        fontFamily: 'Inter',
+                        fontSize: '12px',
+                        fontWeight: 500,
+                        color: '#000',
+                        padding: '0 14px',
+                        cursor: 'pointer'
+                      }}
+                      className="hover:bg-gray-50"
+                    >
+                      Income
+                    </button>
+                  </div>
                 <button
                   onClick={() => setExpandedPanel('top-categories')}
                   style={{
@@ -915,24 +975,33 @@ export default function OverviewRedesignedPage() {
                 >
                   <Expand size={18} style={{ color: '#000' }} />
                 </button>
+                </div>
               </div>
               <div style={{ flex: 1, padding: '15px 20px', overflowY: 'auto' }}>
                 {/* Single column list - similar to mobile */}
                 <div className="space-y-2">
-                  {displayCategoryData.slice(0, 5).map((category) => (
-                    <div key={category.name} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors">
-                      <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <span className="text-2xl flex-shrink-0">{category.emoji}</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-semibold text-gray-900">{category.name}</div>
-                          <div className="text-xs text-gray-600">
-                            {((category.amount / totalExpenses) * 100).toFixed(1)}% of expenses
+                  {displayCategoryData.length === 0 ? (
+                    <p style={{ color: '#9CA3AF', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>
+                      No {categoryFlowMode} transactions in this period.
+                    </p>
+                  ) : displayCategoryData.slice(0, 5).map((category) => {
+                    const totalForPercent = categoryFlowMode === "expense" ? totalExpenses : totalIncome;
+                    const percent = totalForPercent > 0 ? (category.amount / totalForPercent) * 100 : 0;
+                    return (
+                      <div key={category.name} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors">
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <span className="text-2xl flex-shrink-0">{category.emoji}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-semibold text-gray-900">{category.name}</div>
+                            <div className="text-xs text-gray-600">
+                              {percent.toFixed(1)}% of {categoryFlowMode === "expense" ? "expenses" : "income"}
+                            </div>
                           </div>
                         </div>
+                        <span className="text-base font-bold text-gray-900 flex-shrink-0 ml-2">{formatCurrency(category.amount)}</span>
                       </div>
-                      <span className="text-base font-bold text-gray-900 flex-shrink-0 ml-2">{formatCurrency(category.amount)}</span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </div>
