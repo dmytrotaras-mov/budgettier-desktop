@@ -34,6 +34,8 @@ pub struct Transaction {
     pub to_wallet_id: Option<String>,
     #[serde(rename = "excludeFromBudget")]
     pub exclude_from_budget: bool,
+    #[serde(rename = "isOpening")]
+    pub is_opening: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -165,11 +167,16 @@ fn row_to_transaction(row: &Row) -> rusqlite::Result<Transaction> {
         from_wallet_id: row.get(7)?,
         to_wallet_id: row.get(8)?,
         exclude_from_budget: row.get::<_, i64>(9)? != 0,
+        is_opening: row.get::<_, i64>(10)? != 0,
     })
 }
 
+// Columns for INSERT — 10 fields (is_opening defaults to 0 via schema).
 const SELECT_COLS: &str = "id, type, amount, description, date, category_id, wallet_id,
                            from_wallet_id, to_wallet_id, exclude_from_budget";
+// Columns for SELECT/read — includes is_opening at index 10.
+const READ_COLS: &str = "id, type, amount, description, date, category_id, wallet_id,
+                         from_wallet_id, to_wallet_id, exclude_from_budget, is_opening";
 
 #[tauri::command]
 pub fn get_transactions(
@@ -184,7 +191,7 @@ pub fn get_transactions(
             let end_ms = parse_iso_to_ms(&e)?;
             let mut stmt = conn
                 .prepare(&format!(
-                    "SELECT {SELECT_COLS} FROM transactions
+                    "SELECT {READ_COLS} FROM transactions
                      WHERE date >= ?1 AND date <= ?2 ORDER BY date DESC"
                 ))
                 .map_err(|e| e.to_string())?;
@@ -197,7 +204,7 @@ pub fn get_transactions(
         _ => {
             let mut stmt = conn
                 .prepare(&format!(
-                    "SELECT {SELECT_COLS} FROM transactions ORDER BY date DESC"
+                    "SELECT {READ_COLS} FROM transactions ORDER BY date DESC"
                 ))
                 .map_err(|e| e.to_string())?;
             let mapped = stmt
@@ -285,7 +292,7 @@ pub fn create_transaction(
     let conn2 = pool.get().map_err(|e| e.to_string())?;
     let row = conn2
         .query_row(
-            &format!("SELECT {SELECT_COLS} FROM transactions WHERE id = ?1"),
+            &format!("SELECT {READ_COLS} FROM transactions WHERE id = ?1"),
             params![id],
             row_to_transaction,
         )
@@ -411,7 +418,7 @@ pub fn update_transaction(
     let conn2 = pool.get().map_err(|e| e.to_string())?;
     let row = conn2
         .query_row(
-            &format!("SELECT {SELECT_COLS} FROM transactions WHERE id = ?1"),
+            &format!("SELECT {READ_COLS} FROM transactions WHERE id = ?1"),
             params![id],
             row_to_transaction,
         )

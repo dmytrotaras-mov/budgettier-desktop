@@ -3,6 +3,7 @@ pub mod budgets;
 pub mod categories;
 pub mod category_rules;
 pub mod import_wise;
+pub mod opening_balance;
 pub mod settings;
 pub mod transactions;
 pub mod wallets;

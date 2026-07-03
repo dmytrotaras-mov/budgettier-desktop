@@ -52,6 +52,9 @@ pub fn run() {
             commands::category_rules::suggest_category,
             commands::import_wise::preview_wise_csv,
             commands::import_wise::import_wise_csv,
+            commands::opening_balance::get_opening_balance,
+            commands::opening_balance::set_opening_balance,
+            commands::opening_balance::suggest_opening_date,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

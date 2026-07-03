@@ -19,6 +19,7 @@ import { z } from "zod";
 import ProfileSettings from "@/components/settings/profile-settings";
 import CategoryGroups from "@/components/settings/category-groups";
 import StartingBalanceDialog from "@/components/wallets/starting-balance-dialog";
+import OpeningBalanceDialog from "@/components/wallets/opening-balance-dialog";
 import ResponsiveContainer from "@/components/layout/responsive-container";
 import DatabaseSection from "@/components/settings/database-section";
 import AutoCategorizationSection from "@/components/settings/auto-categorization";
@@ -51,6 +52,7 @@ export default function SettingsRedesignedPage() {
 
   const [selectedWallet, setSelectedWallet] = useState<any>(null);
   const [isWalletDialogOpen, setIsWalletDialogOpen] = useState(false);
+  const [openingWallet, setOpeningWallet] = useState<any>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [walletToDelete, setWalletToDelete] = useState<any>(null);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -729,7 +731,30 @@ export default function SettingsRedesignedPage() {
                           <div style={{ fontFamily: 'Inter', fontSize: '12px', fontWeight: 400, color: '#6B7280', textTransform: 'capitalize' }}>{wallet.type}</div>
                         </div>
                       </div>
-                      <span style={{ fontFamily: 'Inter', fontSize: '14px', fontWeight: 600, color: '#000' }}>{formatCurrency(parseFloat(wallet.balance))}</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpeningWallet(wallet);
+                          }}
+                          style={{
+                            fontFamily: 'Inter',
+                            fontSize: '11px',
+                            fontWeight: 500,
+                            color: '#6B7280',
+                            padding: '4px 10px',
+                            border: '1px solid #E5E7EB',
+                            borderRadius: '20px',
+                            backgroundColor: '#fff',
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap'
+                          }}
+                          className="hover:bg-gray-100"
+                        >
+                          Opening balance
+                        </button>
+                        <span style={{ fontFamily: 'Inter', fontSize: '14px', fontWeight: 600, color: '#000' }}>{formatCurrency(parseFloat(wallet.balance))}</span>
+                      </div>
                     </div>
                   ))}
 
@@ -1152,6 +1177,16 @@ export default function SettingsRedesignedPage() {
         isOpen={isStartingBalanceDialogOpen}
         onClose={() => setIsStartingBalanceDialogOpen(false)}
       />
+
+      {/* Opening Balance Dialog */}
+      {openingWallet && (
+        <OpeningBalanceDialog
+          open={!!openingWallet}
+          onClose={() => setOpeningWallet(null)}
+          walletId={openingWallet.id}
+          walletName={openingWallet.name}
+        />
+      )}
     </div>
   );
 }

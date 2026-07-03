@@ -347,6 +347,8 @@ export default function TransactionList({ dateRange }: TransactionListProps) {
   });
 
   const filteredTransactions = transactions.filter(transaction => {
+    // Opening-balance transactions are hidden from the list (managed in Settings).
+    if (transaction.isOpening) return false;
     // Handle category filtering - transfers don't have categories
     if (categoryFilter !== "all") {
       if (transaction.type === "transfer") {

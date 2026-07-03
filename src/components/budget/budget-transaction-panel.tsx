@@ -156,6 +156,9 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
   });
 
   const filteredTransactions = transactions.filter(transaction => {
+    // Opening-balance transactions are managed in Settings → Wallets and never
+    // shown in the transaction list.
+    if (transaction.isOpening) return false;
     if (categoryFilter !== "all") {
       if (transaction.type === "transfer") {
         return false;

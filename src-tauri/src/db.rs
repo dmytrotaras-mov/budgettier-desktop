@@ -59,6 +59,8 @@ pub fn init(app: &AppHandle) -> Result<DbPool, String> {
         .map_err(|e| format!("balance recompute failed: {e}"))?;
     crate::commands::category_rules::seed_default_rules_if_empty(&conn)
         .map_err(|e| format!("rule seed failed: {e}"))?;
+    crate::commands::opening_balance::seed_opening_categories(&conn)
+        .map_err(|e| format!("opening category seed failed: {e}"))?;
 
     Ok(pool)
 }
@@ -208,6 +210,14 @@ const MIGRATIONS: &[&str] = &[
         ALTER TABLE transactions ADD COLUMN external_id TEXT;
         CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_external_id
             ON transactions(external_id) WHERE external_id IS NOT NULL;
+    "#,
+    // ---- v4: opening balance support ----
+    // is_opening flags a transaction as a wallet's starting-balance marker.
+    // These count toward wallet balance but are hidden from the transaction
+    // list and excluded from budget stats. One per wallet (enforced in code).
+    r#"
+        ALTER TABLE transactions ADD COLUMN is_opening INTEGER NOT NULL DEFAULT 0;
+        CREATE INDEX IF NOT EXISTS idx_transactions_is_opening ON transactions(is_opening);
     "#,
 ];
 

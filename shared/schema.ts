@@ -48,6 +48,8 @@ export const transactions = sqliteTable(
     excludeFromBudget: integer("exclude_from_budget", { mode: "boolean" })
       .notNull()
       .default(false),
+    externalId: text("external_id"),
+    isOpening: integer("is_opening", { mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     index("idx_transactions_date").on(table.date),

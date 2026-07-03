@@ -49,6 +49,18 @@ export async function callBackend(
       break;
     }
 
+    // ---- opening balance ----
+    case "opening-balance": {
+      // GET  /api/opening-balance/:walletId          -> current opening (or null)
+      // GET  /api/opening-balance/:walletId/suggest   -> suggested date
+      // POST /api/opening-balance                     -> set
+      if (method === "GET" && a && b === "suggest")
+        return invoke("suggest_opening_date", { walletId: a });
+      if (method === "GET" && a) return invoke("get_opening_balance", { walletId: a });
+      if (method === "POST" && !a) return invoke("set_opening_balance", { input: body });
+      break;
+    }
+
     // ---- categories ----
     case "categories": {
       // GET /api/categories            -> all
