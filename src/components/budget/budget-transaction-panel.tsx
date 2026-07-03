@@ -553,9 +553,28 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
                       marginBottom: '8px'
                     }}
                   >
-                    <p style={{ fontFamily: 'Inter', fontSize: '10px', fontWeight: 600, color: '#6B7280' }}>
-                      {getDateHeader(dateKey)}
-                    </p>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <p style={{ fontFamily: 'Inter', fontSize: '10px', fontWeight: 600, color: '#6B7280', margin: 0 }}>
+                        {getDateHeader(dateKey)}
+                      </p>
+                      {(() => {
+                        const { income, expense } = calculateDayTotals(new Date(dateKey));
+                        return (
+                          <div style={{ display: 'inline-flex', gap: '10px', fontFamily: 'Inter', fontSize: '10px', fontWeight: 600 }}>
+                            {income > 0 && (
+                              <span style={{ color: '#0F6E56' }}>
+                                +{formatCurrency(income)}
+                              </span>
+                            )}
+                            {expense > 0 && (
+                              <span style={{ color: '#991B1B' }}>
+                                −{formatCurrency(expense)}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
                   </div>
 
                   {/* Transactions for this date */}
