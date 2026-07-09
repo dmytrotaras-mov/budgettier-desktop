@@ -210,13 +210,19 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
 
   const formatDate = (ms: number) => {
     const d = new Date(ms);
-    return d.toISOString().slice(0, 10);
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const thisYear = new Date().getUTCFullYear();
+    const y = d.getUTCFullYear();
+    // "26 May" for the current year, "26 May 24" otherwise.
+    return y === thisYear
+      ? `${d.getUTCDate()} ${months[d.getUTCMonth()]}`
+      : `${d.getUTCDate()} ${months[d.getUTCMonth()]} ${String(y).slice(2)}`;
   };
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
       <DialogContent
-        className="max-w-5xl"
+        className="max-w-[95vw] w-[95vw]"
         style={{ maxHeight: "90vh", display: "flex", flexDirection: "column" }}
       >
         <DialogHeader>
@@ -334,18 +340,26 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
               )}
             </div>
 
-            {/* Table */}
+            {/* Table — fixed layout so columns share the full dialog width
+                without horizontal scroll. Flags moved under the description. */}
             <div style={{ flex: 1, overflowY: "auto", border: "1px solid #E5E7EB", borderRadius: 8 }}>
-              <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+              <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse", tableLayout: "fixed" }}>
+                <colgroup>
+                  <col style={{ width: "34px" }} />
+                  <col style={{ width: "72px" }} />
+                  <col />
+                  <col style={{ width: "96px" }} />
+                  <col style={{ width: "44px" }} />
+                  <col style={{ width: "190px" }} />
+                </colgroup>
                 <thead style={{ position: "sticky", top: 0, background: "#F9FAFB", zIndex: 1 }}>
-                  <tr style={{ textAlign: "left" }}>
-                    <th style={{ padding: 8, width: 32 }}></th>
-                    <th style={{ padding: 8 }}>Date</th>
-                    <th style={{ padding: 8 }}>Description</th>
-                    <th style={{ padding: 8, textAlign: "right" }}>Amount</th>
-                    <th style={{ padding: 8 }}>Type</th>
-                    <th style={{ padding: 8 }}>Category / Source</th>
-                    <th style={{ padding: 8 }}>Flags</th>
+                  <tr style={{ textAlign: "left", color: "#6B7280" }}>
+                    <th style={{ padding: "8px 6px" }}></th>
+                    <th style={{ padding: "8px 6px" }}>Date</th>
+                    <th style={{ padding: "8px 6px" }}>Description</th>
+                    <th style={{ padding: "8px 6px", textAlign: "right" }}>Amount</th>
+                    <th style={{ padding: "8px 6px", textAlign: "center" }}>Type</th>
+                    <th style={{ padding: "8px 6px" }}>Category / source</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -353,15 +367,21 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
                     const isTransfer = r.type === "transfer";
                     const categoryList =
                       r.type === "income" ? incomeCategories : expenseCategories;
+                    const typeIcon =
+                      r.type === "income" ? "↑" : r.type === "expense" ? "↓" : "↔";
+                    const typeColor =
+                      r.type === "income" ? "#0F6E56" : r.type === "expense" ? "#991B1B" : "#185FA5";
+                    // Pre-auth / duplicate rows render dimmed; their type icon greys out.
+                    const dimIcon = !r.include;
                     return (
                       <tr
                         key={r.external_id}
                         style={{
                           borderTop: "1px solid #F3F4F6",
-                          opacity: r.include ? 1 : 0.45,
+                          opacity: r.include ? 1 : 0.5,
                         }}
                       >
-                        <td style={{ padding: 8, verticalAlign: "top" }}>
+                        <td style={{ padding: "8px 6px", verticalAlign: "top" }}>
                           <Checkbox
                             checked={r.include}
                             onCheckedChange={(v) =>
@@ -369,34 +389,78 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
                             }
                           />
                         </td>
-                        <td style={{ padding: 8, verticalAlign: "top", color: "#6B7280", whiteSpace: "nowrap" }}>
+                        <td style={{ padding: "8px 6px", verticalAlign: "top", color: "#6B7280", whiteSpace: "nowrap" }}>
                           {formatDate(r.date_ms)}
                         </td>
-                        <td style={{ padding: 8, verticalAlign: "top", maxWidth: 280 }}>
+                        <td style={{ padding: "8px 6px", verticalAlign: "top", overflowWrap: "anywhere" }}>
                           <div style={{ fontWeight: 500 }}>
                             {r.merchant || r.description}
                           </div>
-                          {r.merchant && r.merchant !== r.description && (
-                            <div style={{ color: "#9CA3AF", fontSize: 11, marginTop: 2 }}>
-                              {r.description}
+                          {/* Flags shown here, under the description, instead of a separate column */}
+                          {r.flags.length > 0 && (
+                            <div style={{ marginTop: 3, display: "flex", flexWrap: "wrap", gap: 4 }}>
+                              {r.flags.map((f) => (
+                                <span
+                                  key={f}
+                                  style={{
+                                    display: "inline-block",
+                                    padding: "1px 6px",
+                                    background:
+                                      f === "duplicate"
+                                        ? "#FEE2E2"
+                                        : f === "uncategorized"
+                                          ? "#FEF3C7"
+                                          : f === "pre-auth"
+                                            ? "#E5E7EB"
+                                            : f === "transfer"
+                                              ? "#DBEAFE"
+                                              : "#F3F4F6",
+                                    color:
+                                      f === "duplicate"
+                                        ? "#991B1B"
+                                        : f === "uncategorized"
+                                          ? "#92400E"
+                                          : f === "transfer"
+                                            ? "#1E40AF"
+                                            : "#374151",
+                                    borderRadius: 4,
+                                    fontSize: 10,
+                                    fontWeight: 500,
+                                  }}
+                                >
+                                  {f}
+                                </span>
+                              ))}
                             </div>
                           )}
                         </td>
                         <td
                           style={{
-                            padding: 8,
+                            padding: "8px 6px",
                             verticalAlign: "top",
                             textAlign: "right",
                             fontWeight: 500,
                             whiteSpace: "nowrap",
-                            color: r.type === "income" ? "#059669" : "#000",
+                            color: r.type === "income" ? "#0F6E56" : r.type === "expense" ? "#991B1B" : "#000",
                           }}
                         >
-                          {r.type === "income" ? "+" : r.type === "expense" ? "−" : "↔ "}
+                          {r.type === "income" ? "+" : r.type === "expense" ? "−" : ""}
                           €{r.amount}
                         </td>
-                        <td style={{ padding: 8, verticalAlign: "top" }}>{r.type}</td>
-                        <td style={{ padding: 8, verticalAlign: "top", minWidth: 200 }}>
+                        <td
+                          style={{
+                            padding: "8px 6px",
+                            verticalAlign: "top",
+                            textAlign: "center",
+                            fontSize: 15,
+                            fontWeight: 600,
+                            color: dimIcon ? "#9CA3AF" : typeColor,
+                          }}
+                          title={r.type}
+                        >
+                          {typeIcon}
+                        </td>
+                        <td style={{ padding: "8px 6px", verticalAlign: "top" }}>
                           {isTransfer ? (
                             <Select
                               value={r.suggested_from_wallet_id ?? ""}
@@ -436,42 +500,6 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
                               </SelectContent>
                             </Select>
                           )}
-                        </td>
-                        <td style={{ padding: 8, verticalAlign: "top" }}>
-                          {r.flags.map((f) => (
-                            <span
-                              key={f}
-                              style={{
-                                display: "inline-block",
-                                padding: "2px 6px",
-                                marginRight: 4,
-                                marginBottom: 2,
-                                background:
-                                  f === "duplicate"
-                                    ? "#FEE2E2"
-                                    : f === "uncategorized"
-                                      ? "#FEF3C7"
-                                      : f === "pre-auth"
-                                        ? "#E5E7EB"
-                                        : f === "transfer"
-                                          ? "#DBEAFE"
-                                          : "#F3F4F6",
-                                color:
-                                  f === "duplicate"
-                                    ? "#991B1B"
-                                    : f === "uncategorized"
-                                      ? "#92400E"
-                                      : f === "transfer"
-                                        ? "#1E40AF"
-                                        : "#374151",
-                                borderRadius: 4,
-                                fontSize: 10,
-                                fontWeight: 500,
-                              }}
-                            >
-                              {f}
-                            </span>
-                          ))}
                         </td>
                       </tr>
                     );
