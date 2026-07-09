@@ -222,7 +222,7 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
   return (
     <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
       <DialogContent
-        className="max-w-[95vw] w-[95vw]"
+        className="md:!max-w-[1100px] md:!w-[92vw]"
         style={{ maxHeight: "90vh", display: "flex", flexDirection: "column" }}
       >
         <DialogHeader>
@@ -392,7 +392,7 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
                         <td style={{ padding: "8px 6px", verticalAlign: "top", color: "#6B7280", whiteSpace: "nowrap" }}>
                           {formatDate(r.date_ms)}
                         </td>
-                        <td style={{ padding: "8px 6px", verticalAlign: "top", overflowWrap: "anywhere" }}>
+                        <td style={{ padding: "8px 6px", verticalAlign: "top", wordBreak: "break-word" }}>
                           <div style={{ fontWeight: 500 }}>
                             {r.merchant || r.description}
                           </div>
