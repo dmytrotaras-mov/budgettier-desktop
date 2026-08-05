@@ -76,6 +76,16 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
   const [doneSummary, setDoneSummary] = useState<{ inserted: number; skipped: number } | null>(
     null,
   );
+  // Merchant patterns the user chose to remember → saved as category rules on import.
+  // Map of pattern (e.g. "Bolt") → categoryId.
+  const [rulesToSave, setRulesToSave] = useState<Record<string, string>>({});
+  // Active "apply to similar?" prompt after the user picks a category for a row.
+  const [applyPrompt, setApplyPrompt] = useState<{
+    rowIdx: number;
+    pattern: string;
+    categoryId: string;
+    similarCount: number;
+  } | null>(null);
 
   const { data: wallets = [] } = useQuery<Wallet[]>({ queryKey: ["/api/wallets"] });
   const { data: categories = [] } = useQuery<Category[]>({ queryKey: ["/api/categories"] });
@@ -90,6 +100,18 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
     setTargetWalletId("");
     setPreview(null);
     setDoneSummary(null);
+    setRulesToSave({});
+    setApplyPrompt(null);
+  };
+
+  // Derive the "significant" part of a merchant string to use as a rule pattern.
+  // "Bolt.euo2605021646 Tallinn" → "Bolt", "Flix M nchen" → "Flix",
+  // "Rewe Markt Gmbh-Zw Berlin" → "Rewe". Takes the leading run of letters
+  // (stops at first digit, dot, or space).
+  const derivePattern = (merchant: string): string => {
+    const m = (merchant || "").trim();
+    const match = m.match(/^[A-Za-zÀ-ÿ]+/);
+    return match ? match[0] : m.split(/[\s.]/)[0] || m;
   };
 
   const handleClose = () => {
@@ -147,6 +169,54 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
     setPreview({ ...preview, rows });
   };
 
+  // Called when the user picks a category for a row. If other rows share the
+  // same merchant pattern and have no category yet, raise the "apply to
+  // similar?" prompt.
+  const onPickCategory = (idx: number, categoryId: string) => {
+    if (!preview) return;
+    const rows = preview.rows.map((r, i) =>
+      i === idx ? { ...r, suggested_category_id: categoryId } : r,
+    );
+    const picked = preview.rows[idx];
+    const pattern = derivePattern(picked.merchant || picked.description);
+    // Count other expense/income rows with same pattern still needing a category.
+    const similar = rows.filter(
+      (r, i) =>
+        i !== idx &&
+        r.type !== "transfer" &&
+        !r.suggested_category_id &&
+        derivePattern(r.merchant || r.description).toLowerCase() === pattern.toLowerCase(),
+    );
+    setPreview({ ...preview, rows });
+    if (pattern) {
+      setApplyPrompt({
+        rowIdx: idx,
+        pattern,
+        categoryId,
+        similarCount: similar.length,
+      });
+    }
+  };
+
+  // User accepted the prompt: fill similar rows now + queue the rule for saving.
+  const acceptApplyPrompt = () => {
+    if (!preview || !applyPrompt) return;
+    const { pattern, categoryId } = applyPrompt;
+    const rows = preview.rows.map((r) => {
+      if (
+        r.type !== "transfer" &&
+        !r.suggested_category_id &&
+        derivePattern(r.merchant || r.description).toLowerCase() === pattern.toLowerCase()
+      ) {
+        return { ...r, suggested_category_id: categoryId };
+      }
+      return r;
+    });
+    setPreview({ ...preview, rows });
+    setRulesToSave((prev) => ({ ...prev, [pattern]: categoryId }));
+    setApplyPrompt(null);
+  };
+
   const doImport = async () => {
     if (!preview) return;
     const rows = preview.rows
@@ -193,6 +263,23 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
           input: { rows, target_wallet_id: targetWalletId },
         },
       );
+      // Persist any remembered merchant→category rules so future imports and
+      // manual entry auto-categorize them. Best-effort — a failed rule save
+      // shouldn't fail the import that already succeeded.
+      const patterns = Object.entries(rulesToSave);
+      for (const [pattern, categoryId] of patterns) {
+        try {
+          await invoke("create_category_rule", {
+            input: { pattern, categoryId },
+          });
+        } catch {
+          /* ignore — rule may already exist */
+        }
+      }
+      if (patterns.length > 0) {
+        queryClient.invalidateQueries({ queryKey: ["/api/category-rules"] });
+      }
+
       setDoneSummary(res);
       setStage("done");
       queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
@@ -340,6 +427,45 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
               )}
             </div>
 
+            {/* "Apply to similar + remember" prompt after a category pick */}
+            {applyPrompt && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: "10px 14px",
+                  marginBottom: 12,
+                  background: "#EFF6FF",
+                  border: "1px solid #BFDBFE",
+                  borderRadius: 8,
+                  fontSize: 12,
+                }}
+              >
+                <span style={{ flex: 1, color: "#1E40AF" }}>
+                  Remember <b>{applyPrompt.pattern}</b> as this category
+                  {applyPrompt.similarCount > 0
+                    ? ` and apply to ${applyPrompt.similarCount} similar row${applyPrompt.similarCount === 1 ? "" : "s"} now?`
+                    : " for future imports?"}
+                </span>
+                <Button
+                  size="sm"
+                  onClick={acceptApplyPrompt}
+                  style={{ height: 28, fontSize: 12 }}
+                >
+                  Yes
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setApplyPrompt(null)}
+                  style={{ height: 28, fontSize: 12 }}
+                >
+                  No
+                </Button>
+              </div>
+            )}
+
             {/* Table — fixed layout so columns share the full dialog width
                 without horizontal scroll. Flags moved under the description. */}
             <div style={{ flex: 1, overflowY: "auto", border: "1px solid #E5E7EB", borderRadius: 8 }}>
@@ -484,9 +610,7 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
                           ) : (
                             <Select
                               value={r.suggested_category_id ?? ""}
-                              onValueChange={(v) =>
-                                updateRow(idx, { suggested_category_id: v })
-                              }
+                              onValueChange={(v) => onPickCategory(idx, v)}
                             >
                               <SelectTrigger style={{ height: 32 }}>
                                 <SelectValue placeholder="Pick category…" />
