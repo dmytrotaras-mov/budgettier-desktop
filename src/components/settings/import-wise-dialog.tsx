@@ -32,7 +32,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileUp, AlertCircle } from "lucide-react";
+import { FileUp, AlertCircle, AlertTriangle } from "lucide-react";
 import type { Wallet, Category } from "@shared/schema";
 
 interface PreviewRow {
@@ -112,6 +112,14 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
     const m = (merchant || "").trim();
     const match = m.match(/^[A-Za-zÀ-ÿ]+/);
     return match ? match[0] : m.split(/[\s.]/)[0] || m;
+  };
+
+  // A row still needs attention if it's included but missing its required
+  // field: a category for income/expense, or a source wallet for transfers.
+  const rowNeedsAttention = (r: PreviewRow): boolean => {
+    if (!r.include) return false;
+    if (r.type === "transfer") return !r.suggested_from_wallet_id;
+    return !r.suggested_category_id;
   };
 
   const handleClose = () => {
@@ -427,6 +435,35 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
               )}
             </div>
 
+            {/* Attention banner — how many included rows still need a category
+                or a transfer source. These are sorted to the top of the table. */}
+            {(() => {
+              const attentionCount = preview.rows.filter(rowNeedsAttention).length;
+              if (attentionCount === 0) return null;
+              return (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "10px 14px",
+                    marginBottom: 12,
+                    background: "#FFFBEB",
+                    border: "1px solid #FDE68A",
+                    borderRadius: 8,
+                    fontSize: 12,
+                    color: "#92400E",
+                  }}
+                >
+                  <AlertTriangle className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+                  <span>
+                    <b>{attentionCount}</b> transaction{attentionCount === 1 ? "" : "s"} still
+                    need{attentionCount === 1 ? "s" : ""} a category or source — shown at the top.
+                  </span>
+                </div>
+              );
+            })()}
+
             {/* "Apply to similar + remember" prompt after a category pick */}
             {applyPrompt && (
               <div
@@ -489,8 +526,19 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
                   </tr>
                 </thead>
                 <tbody>
-                  {preview.rows.map((r, idx) => {
+                  {preview.rows
+                    .map((r, idx) => ({ r, idx })) // keep original index for updates
+                    .sort((a, b) => {
+                      // Rows needing attention float to the top; once resolved
+                      // they fall back to their natural date order (newest first).
+                      const na = rowNeedsAttention(a.r) ? 0 : 1;
+                      const nb = rowNeedsAttention(b.r) ? 0 : 1;
+                      if (na !== nb) return na - nb;
+                      return b.r.date_ms - a.r.date_ms;
+                    })
+                    .map(({ r, idx }) => {
                     const isTransfer = r.type === "transfer";
+                    const needsAttention = rowNeedsAttention(r);
                     const categoryList =
                       r.type === "income" ? incomeCategories : expenseCategories;
                     const typeIcon =
@@ -505,6 +553,8 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
                         style={{
                           borderTop: "1px solid #F3F4F6",
                           opacity: r.include ? 1 : 0.5,
+                          background: needsAttention ? "#FFFBEB" : "transparent",
+                          boxShadow: needsAttention ? "inset 3px 0 0 #F59E0B" : "none",
                         }}
                       >
                         <td style={{ padding: "8px 6px", verticalAlign: "top" }}>
