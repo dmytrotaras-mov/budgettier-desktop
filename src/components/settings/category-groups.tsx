@@ -32,6 +32,7 @@ import {
   X
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
+import { defaultSectionCategories } from "@/lib/sectionUtils";
 
 const categoryFormSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -119,56 +120,56 @@ const categoryGroups = {
       name: "Housing & Utilities",
       icon: Home,
       emoji: "🏠",
-      categories: ["Rent/Mortgage", "Electricity", "Water", "Gas/Heating", "Internet/Phone"]
+      categories: defaultSectionCategories["expense_housing_utilities"]
     },
     {
       id: "expense_food_drinks",
       name: "Food & Drinks",
       icon: Utensils,
       emoji: "🍽️",
-      categories: ["Groceries", "Restaurants/Cafes", "Food Delivery"]
+      categories: defaultSectionCategories["expense_food_drinks"]
     },
     {
       id: "expense_transportation",
       name: "Transportation",
       icon: Car,
       emoji: "🚗",
-      categories: ["Public Transport", "Fuel/Gas", "Taxi/Ride Sharing", "Car Maintenance"]
+      categories: defaultSectionCategories["expense_transportation"]
     },
     {
       id: "expense_health_wellness",
       name: "Health & Wellness",
       icon: Heart,
       emoji: "🏥",
-      categories: ["Health Insurance", "Doctor/Dentist", "Medicine", "Gym/Fitness"]
+      categories: defaultSectionCategories["expense_health_wellness"]
     },
     {
       id: "expense_entertainment",
       name: "Entertainment",
       icon: Gamepad2,
       emoji: "🎬",
-      categories: ["Subscriptions", "Hobbies", "Travel", "Events/Cinema"]
+      categories: defaultSectionCategories["expense_entertainment"]
     },
     {
       id: "expense_shopping",
       name: "Shopping",
       icon: ShoppingBag,
       emoji: "🛍️",
-      categories: ["Clothes/Shoes", "Home Goods"]
+      categories: defaultSectionCategories["expense_shopping"]
     },
     {
       id: "expense_finance",
       name: "Finance",
       icon: CreditCard,
       emoji: "💳",
-      categories: ["Loans/Credit", "Savings/Investments", "Insurance"]
+      categories: defaultSectionCategories["expense_finance"]
     },
     {
       id: "expense_education_other",
       name: "Education & Other",
       icon: GraduationCap,
       emoji: "📚",
-      categories: ["Education", "Gifts/Charity", "Miscellaneous"]
+      categories: defaultSectionCategories["expense_education_other"]
     }
   ],
   income: [
@@ -177,14 +178,14 @@ const categoryGroups = {
       name: "Primary Income",
       icon: TrendingUp,
       emoji: "💰",
-      categories: ["Salary", "Freelance", "Business"]
+      categories: defaultSectionCategories["income_primary"]
     },
     {
       id: "income_other",
       name: "Other Income",
       icon: DollarSign,
       emoji: "💵",
-      categories: ["Investments", "Rental Income", "Other Income"]
+      categories: defaultSectionCategories["income_other"]
     }
   ]
 };

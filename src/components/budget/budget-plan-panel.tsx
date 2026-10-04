@@ -12,6 +12,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useCurrency } from "@/hooks/useCurrency";
 import type { Transaction, Category, BudgetCategoryAllocation } from "@shared/schema";
 import CategorySelector from "@/components/track/category-selector-redesigned";
+import { defaultSectionNames, resolveCategorySection, UNGROUPED_SECTION_NAME } from "@/lib/sectionUtils";
 
 // Category emojis and sections mapping
 const categoryEmojis = {
@@ -27,28 +28,6 @@ const categoryEmojis = {
   "Education": "📖", "Gifts/Charity": "🎁", "Miscellaneous": "📋",
   "Salary": "💰", "Freelance": "💼", "Business": "🏢", "Investments": "📊",
   "Rental Income": "🏠", "Other Income": "💵",
-};
-
-const categorySections: { [key: string]: string } = {
-  "Rent/Mortgage": "Housing & Utilities", "Electricity": "Housing & Utilities",
-  "Water": "Housing & Utilities", "Gas/Heating": "Housing & Utilities",
-  "Internet/Phone": "Housing & Utilities", "Home Maintenance": "Housing & Utilities",
-  "Property Tax": "Housing & Utilities", "Home Insurance": "Housing & Utilities",
-  "Groceries": "Food & Drinks", "Restaurants/Cafes": "Food & Drinks",
-  "Food Delivery": "Food & Drinks", "Coffee/Snacks": "Food & Drinks",
-  "Public Transport": "Transportation", "Fuel/Gas": "Transportation",
-  "Taxi/Ride Sharing": "Transportation", "Car Maintenance": "Transportation",
-  "Car Insurance": "Transportation", "Parking": "Transportation",
-  "Health Insurance": "Health & Wellness", "Doctor/Dentist": "Health & Wellness",
-  "Medicine": "Health & Wellness", "Gym/Fitness": "Health & Wellness",
-  "Mental Health": "Health & Wellness", "Subscriptions": "Entertainment & Leisure",
-  "Hobbies": "Entertainment & Leisure", "Travel": "Entertainment & Leisure",
-  "Events/Cinema": "Entertainment & Leisure", "Books/Media": "Entertainment & Leisure",
-  "Clothes/Shoes": "Shopping", "Home Goods": "Shopping",
-  "Electronics": "Shopping", "Personal Care": "Shopping",
-  "Loans/Credit": "Finance & Obligations", "Savings/Investments": "Finance & Obligations",
-  "Insurance": "Finance & Obligations", "Bank Fees": "Finance & Obligations",
-  "Education": "Other", "Gifts/Charity": "Other", "Miscellaneous": "Other",
 };
 
 interface BudgetPlanPanelProps {
@@ -97,17 +76,16 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
   };
 
   const getSortedBudgetAllocations = () => {
-    // Define section order matching the category selector
-    const sectionOrder = [
-      "Housing & Utilities",
-      "Food & Drinks",
-      "Transportation",
-      "Health & Wellness",
-      "Entertainment & Leisure",
-      "Shopping",
-      "Finance & Obligations",
-      "Other"
-    ];
+    // Built-in sections first (in Settings order), then custom sections,
+    // then ungrouped "Custom Categories" last.
+    const sectionOrder = Object.keys(defaultSectionNames)
+      .filter((id) => id.startsWith("expense"))
+      .map((id) => defaultSectionNames[id]);
+    const sectionRank = (section: string) => {
+      if (section === UNGROUPED_SECTION_NAME) return 1000;
+      const idx = sectionOrder.indexOf(section);
+      return idx === -1 ? 500 : idx;
+    };
 
     const allocationsWithData = budgetAllocations
       .map((allocation) => {
@@ -118,8 +96,8 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
         const spent = calculateCategorySpending(allocation.categoryId);
         const budget = parseFloat(allocation.allocatedAmount);
         const remaining = budget - spent;
-        // Use the category's section field from database, fallback to hardcoded mapping for legacy categories
-        const section = category.section || categorySections[category.name] || "Other";
+        // Same section resolution Settings and Overview use.
+        const section = resolveCategorySection(category, "expense");
 
         return { allocation, category, spent, budget, remaining, section };
       })
@@ -134,12 +112,10 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
 
     // Always sort by section in the defined order
     return allocationsWithData.sort((a, b) => {
-      const sectionIndexA = sectionOrder.indexOf(a.section);
-      const sectionIndexB = sectionOrder.indexOf(b.section);
-
-      if (sectionIndexA !== sectionIndexB) {
-        return sectionIndexA - sectionIndexB;
-      }
+      const rankA = sectionRank(a.section);
+      const rankB = sectionRank(b.section);
+      if (rankA !== rankB) return rankA - rankB;
+      if (a.section !== b.section) return a.section.localeCompare(b.section);
       // Within same section, sort by category name
       return a.category.name.localeCompare(b.category.name);
     });

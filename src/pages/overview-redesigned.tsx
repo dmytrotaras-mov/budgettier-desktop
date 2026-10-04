@@ -8,7 +8,7 @@ import { TrendingUp, TrendingDown, Wallet, ChevronLeft, ChevronRight, Expand, Pi
 import { format, startOfMonth, endOfMonth, addMonths, subMonths } from "date-fns";
 import { useCurrency } from "@/hooks/useCurrency";
 import ResponsiveContainer from "@/components/layout/responsive-container";
-import { getSectionEmojiFromStorage } from "@/lib/sectionUtils";
+import { getSectionEmojiFromStorage, resolveCategorySection } from "@/lib/sectionUtils";
 import {
   calculateYearOverview,
   calculateYearsProgress,
@@ -460,9 +460,9 @@ export default function OverviewRedesignedPage() {
       if (t.type !== categoryFlowMode || t.excludeFromBudget) continue;
       const category = categoryMap.get(t.categoryId);
       const categoryName = category?.name || "Other";
-      // Use the section the user actually set in their categories. No hardcoded
-      // fallback — categories without a section go to a single 'Other' bucket.
-      const section = category?.section || "Other";
+      // Same resolution Settings uses: DB section → manual assignment →
+      // built-in membership → "Custom Categories".
+      const section = resolveCategorySection(category, categoryFlowMode);
 
       if (!acc[section]) {
         acc[section] = {
