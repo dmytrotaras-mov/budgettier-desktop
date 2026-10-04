@@ -65,9 +65,11 @@ pub fn create_category_rule(
 ) -> Result<CategoryRule, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
     let id = Uuid::new_v4().to_string();
-    let pattern = input.pattern.trim().to_string();
-    if pattern.is_empty() {
-        return Err("Pattern can't be empty".into());
+    let pattern = input.pattern.split_whitespace().collect::<Vec<_>>().join(" ");
+    if pattern.chars().count() < MIN_PATTERN_LEN {
+        return Err(format!(
+            "Pattern must be at least {MIN_PATTERN_LEN} characters — shorter ones match almost everything"
+        ));
     }
     conn.execute(
         "INSERT INTO category_rules (id, pattern, category_id) VALUES (?1, ?2, ?3)",
@@ -102,35 +104,99 @@ pub fn delete_category_rule(pool: State<DbPool>, id: String) -> Result<(), Strin
     Ok(())
 }
 
-/// Given a transaction description/merchant string, return the category_id
-/// of the FIRST matching rule (longest pattern wins to handle overlapping
-/// patterns gracefully, e.g. "Dm Drogerie" vs "Dm" — we want the more
-/// specific one). Returns None if nothing matches.
+/// Shortest pattern a rule may have. One-letter rules matched nearly every
+/// merchant and silently mis-categorized imports.
+pub const MIN_PATTERN_LEN: usize = 2;
+
+/// Lowercase and collapse runs of whitespace ("BB Berlin  Facility" from Wise
+/// must still match a "BB Berlin Facility" rule).
+pub fn normalize_for_match(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+}
+
+/// True if `pattern` occurs in `text` at the START of a word, so "rice" does
+/// not match "price" and "ls" does not match "rolls". Both inputs must already
+/// be normalized.
+pub fn matches_at_word_start(text: &str, pattern: &str) -> bool {
+    if pattern.is_empty() {
+        return false;
+    }
+    let mut from = 0;
+    while let Some(pos) = text[from..].find(pattern) {
+        let idx = from + pos;
+        let prev_is_word_char = text[..idx]
+            .chars()
+            .next_back()
+            .map_or(false, |c| c.is_alphanumeric());
+        if !prev_is_word_char {
+            return true;
+        }
+        from = idx + text[idx..].chars().next().map_or(1, |c| c.len_utf8());
+    }
+    false
+}
+
+/// All rules, normalized and ordered longest-first so the most specific
+/// pattern wins (e.g. "Dm Drogerie" before "Dm").
+pub struct RuleMatcher {
+    rules: Vec<(String, String, String)>, // (normalized pattern, original pattern, category_id)
+}
+
+impl RuleMatcher {
+    pub fn load(conn: &rusqlite::Connection) -> rusqlite::Result<Self> {
+        let mut stmt = conn.prepare("SELECT pattern, category_id FROM category_rules")?;
+        let mapped = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        let mut rules = Vec::new();
+        for row in mapped {
+            let (pattern, category_id) = row?;
+            let normalized = normalize_for_match(&pattern);
+            if normalized.chars().count() >= MIN_PATTERN_LEN {
+                rules.push((normalized, pattern, category_id));
+            }
+        }
+        rules.sort_by(|a, b| b.0.chars().count().cmp(&a.0.chars().count()).then(a.0.cmp(&b.0)));
+        Ok(Self { rules })
+    }
+
+    /// Returns (original pattern, category_id) of the best matching rule.
+    pub fn find(&self, text: &str) -> Option<(&str, &str)> {
+        let text = normalize_for_match(text);
+        self.rules
+            .iter()
+            .find(|(pattern, _, _)| matches_at_word_start(&text, pattern))
+            .map(|(_, original, category_id)| (original.as_str(), category_id.as_str()))
+    }
+}
+
+/// Suggest a category for a transaction description typed by the user.
+/// Returns None if no rule matches.
 #[tauri::command]
 pub fn suggest_category(
     pool: State<DbPool>,
     description: String,
 ) -> Result<Option<String>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
-    let needle = description.to_lowercase();
-    let mut stmt = conn
-        .prepare(
-            "SELECT pattern, category_id FROM category_rules
-             ORDER BY LENGTH(pattern) DESC",
-        )
-        .map_err(|e| e.to_string())?;
-    let mapped = stmt
-        .query_map([], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-        })
-        .map_err(|e| e.to_string())?;
-    for row in mapped {
-        let (pattern, category_id) = row.map_err(|e| e.to_string())?;
-        if needle.contains(&pattern.to_lowercase()) {
-            return Ok(Some(category_id));
-        }
+    let matcher = RuleMatcher::load(&conn).map_err(|e| e.to_string())?;
+    Ok(matcher.find(&description).map(|(_, category_id)| category_id.to_string()))
+}
+
+#[cfg(test)]
+mod matcher_tests {
+    use super::*;
+
+    #[test]
+    fn word_start_matching() {
+        let m = |t: &str, p: &str| matches_at_word_start(&normalize_for_match(t), &normalize_for_match(p));
+        assert!(m("Rewe Markt Gmbh-Zw Berlin", "Rewe"));
+        assert!(m("H&m Home De0191 BERLIN", "H&M"));
+        assert!(m("Paid to BB Berlin  Facility Management GmbH", "BB Berlin Facility"));
+        assert!(m("Spc*Apo Rosenthaler Platz", "Apo"));
+        assert!(!m("Sp No Sugar Factory BERLIN", "a"));
+        assert!(!m("Mcpaper Berlin", "Rice"));
+        assert!(!m("Price Club", "Rice"));
+        assert!(!m("Rolls Royce", "Ls"));
+        assert!(m("Ls Akkurat Cafe Berlin", "Ls"));
     }
-    Ok(None)
 }
 
 /// Seed default rules on first launch (or first launch after schema v2).

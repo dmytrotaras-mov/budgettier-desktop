@@ -40,6 +40,9 @@ pub struct PreviewRow {
     pub merchant: String,
     /// Suggested category id (matched via category_rules). None = uncategorized.
     pub suggested_category_id: Option<String>,
+    /// The rule pattern that produced suggested_category_id, shown in the
+    /// preview so a wrong auto-match is easy to spot.
+    pub matched_pattern: Option<String>,
     /// For transfers only: suggested source wallet id (if Wise tells us
     /// "Moved from <name>" and we found a matching wallet).
     pub suggested_from_wallet_id: Option<String>,
@@ -133,27 +136,9 @@ pub fn preview_wise_csv(
             .collect()
     };
 
-    // Pre-fetch all rules for in-memory category suggestion (avoids N queries).
-    let rules: Vec<(String, String)> = {
-        let mut stmt = conn
-            .prepare("SELECT pattern, category_id FROM category_rules ORDER BY LENGTH(pattern) DESC")
-            .map_err(|e| e.to_string())?;
-        let mapped = stmt
-            .query_map([], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-            })
-            .map_err(|e| e.to_string())?;
-        mapped.filter_map(|r| r.ok()).collect()
-    };
-    let suggest = |desc_and_merchant: &str| -> Option<String> {
-        let needle = desc_and_merchant.to_lowercase();
-        for (pattern, cat_id) in &rules {
-            if needle.contains(&pattern.to_lowercase()) {
-                return Some(cat_id.clone());
-            }
-        }
-        None
-    };
+    // Rules, loaded once (longest pattern first, word-start matching).
+    let matcher = crate::commands::category_rules::RuleMatcher::load(&conn)
+        .map_err(|e| e.to_string())?;
 
     // ---- Step 1: classify each row ----
     let mut preview: Vec<PreviewRow> = Vec::new();
@@ -227,12 +212,18 @@ pub fn preview_wise_csv(
             flags.push("cashback".into());
         }
 
-        // Suggest category from rules (skip for transfers — they don't carry a category)
-        let suggested_category_id = if kind == "transfer" {
-            None
+        // Suggest category from rules (skip for transfers — they don't carry a
+        // category). Match the merchant; only rows without a merchant (fees,
+        // deposits) fall back to the description, so boilerplate like
+        // "Card transaction of 12.00 EUR issued by" can't trigger a rule.
+        let (suggested_category_id, matched_pattern) = if kind == "transfer" {
+            (None, None)
         } else {
-            // Try merchant first (cleaner), fall back to description.
-            suggest(&merchant).or_else(|| suggest(&description))
+            let text = if merchant.trim().is_empty() { &description } else { &merchant };
+            match matcher.find(text) {
+                Some((pattern, category_id)) => (Some(category_id.to_string()), Some(pattern.to_string())),
+                None => (None, None),
+            }
         };
 
         let include = !is_dup;
@@ -248,6 +239,7 @@ pub fn preview_wise_csv(
             description: description.clone(),
             merchant: merchant.clone(),
             suggested_category_id,
+            matched_pattern,
             suggested_from_wallet_id,
             flags,
             include,

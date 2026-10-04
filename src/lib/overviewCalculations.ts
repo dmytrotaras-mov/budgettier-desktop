@@ -21,8 +21,10 @@ export function calculateYearOverview(transactions: any[], selectedDate: Date, c
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
   return months.map((month, index) => {
-    const monthStart = new Date(Date.UTC(year, index, 1));
-    const monthEnd = new Date(Date.UTC(year, index + 1, 0, 23, 59, 59, 999));
+    // Local-time month boundaries — same convention as the summary tiles
+    // (startOfMonth/endOfMonth), so both show the same numbers for a month.
+    const monthStart = new Date(year, index, 1);
+    const monthEnd = new Date(year, index + 1, 0, 23, 59, 59, 999);
 
     let income = 0;
     let expenses = 0;

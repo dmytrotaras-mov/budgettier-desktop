@@ -22,12 +22,9 @@ export default function BudgetWarning({ categoryId, className }: BudgetWarningPr
   });
 
   // Get current month transactions
+  // Default query function routes this to the local database (date range).
   const { data: transactions = [] } = useQuery<any[]>({
     queryKey: ["/api/transactions", monthStart.toISOString(), monthEnd.toISOString()],
-    queryFn: async () => {
-      const response = await fetch(`/api/transactions?startDate=${monthStart.toISOString()}&endDate=${monthEnd.toISOString()}`);
-      return response.json();
-    },
   });
 
   // Get categories

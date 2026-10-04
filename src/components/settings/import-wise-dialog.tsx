@@ -44,6 +44,8 @@ interface PreviewRow {
   description: string;
   merchant: string;
   suggested_category_id: string | null;
+  // Rule pattern that auto-filled the category (cleared once the user picks).
+  matched_pattern: string | null;
   suggested_from_wallet_id: string | null;
   flags: string[];
   include: boolean;
@@ -107,13 +109,24 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
   };
 
   // Derive the "significant" part of a merchant string to use as a rule pattern.
-  // "Bolt.euo2605021646 Tallinn" → "Bolt", "Flix M nchen" → "Flix",
-  // "Rewe Markt Gmbh-Zw Berlin" → "Rewe". Takes the leading run of letters
-  // (stops at first digit, dot, or space).
+  //   "Bolt.euo2605021646 Tallinn" → "Bolt"     "H&m Home De0191" → "H&m"
+  //   "Ls Akkurat Cafe Berlin"     → "Akkurat"  "Sumup  *Schneiderei" → "Schneiderei"
+  //   "Dm Drogerie Sagt Danke"     → "Dm Drogerie"
+  // Payment-processor prefixes are skipped (they front many unrelated shops),
+  // short first words get the next word added, and anything under 3 characters
+  // is rejected — "A" or "H" would match almost every merchant.
+  const PROCESSOR_PREFIXES = new Set(["sumup", "spc", "sp", "ls", "sq", "zettle", "iz", "uzr", "nyx", "paypal", "pp"]);
+  const GENERIC_WORDS = new Set(["card", "paid", "to", "received", "moved", "eur", "transfer", "money", "from", "the"]);
   const derivePattern = (merchant: string): string => {
-    const m = (merchant || "").trim();
-    const match = m.match(/^[A-Za-zÀ-ÿ]+/);
-    return match ? match[0] : m.split(/[\s.]/)[0] || m;
+    let words = (merchant || "").replace(/\*/g, " ").trim().split(/\s+/).filter(Boolean);
+    while (words.length > 1 && PROCESSOR_PREFIXES.has(words[0].toLowerCase())) words = words.slice(1);
+    if (words.length === 0) return "";
+    const lead = (w: string) => w.match(/^[\p{L}&'+]+/u)?.[0] ?? "";
+    let pattern = lead(words[0]) || words[0];
+    if ((pattern.length < 3 || GENERIC_WORDS.has(pattern.toLowerCase())) && words[1]) {
+      pattern = `${pattern} ${lead(words[1]) || words[1]}`;
+    }
+    return pattern.length >= 3 ? pattern : "";
   };
 
   // A row still needs attention if it's included but missing its required
@@ -185,10 +198,14 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
   const onPickCategory = (idx: number, categoryId: string) => {
     if (!preview) return;
     const rows = preview.rows.map((r, i) =>
-      i === idx ? { ...r, suggested_category_id: categoryId } : r,
+      i === idx ? { ...r, suggested_category_id: categoryId, matched_pattern: null } : r,
     );
     const picked = preview.rows[idx];
     const pattern = derivePattern(picked.merchant || picked.description);
+    if (!pattern) {
+      setPreview({ ...preview, rows });
+      return;
+    }
     // Count other expense/income rows with same pattern still needing a category.
     const similar = rows.filter(
       (r, i) =>
@@ -218,7 +235,7 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
         !r.suggested_category_id &&
         derivePattern(r.merchant || r.description).toLowerCase() === pattern.toLowerCase()
       ) {
-        return { ...r, suggested_category_id: categoryId };
+        return { ...r, suggested_category_id: categoryId, matched_pattern: null };
       }
       return r;
     });
@@ -660,21 +677,28 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
                               </SelectContent>
                             </Select>
                           ) : (
-                            <Select
-                              value={r.suggested_category_id ?? ""}
-                              onValueChange={(v) => onPickCategory(idx, v)}
-                            >
-                              <SelectTrigger style={{ height: 32 }}>
-                                <SelectValue placeholder="Pick category…" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {categoryList.map((c: any) => (
-                                  <SelectItem key={c.id} value={c.id}>
-                                    {c.emoji} {c.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+<div>
+                              <Select
+                                value={r.suggested_category_id ?? ""}
+                                onValueChange={(v) => onPickCategory(idx, v)}
+                              >
+                                <SelectTrigger style={{ height: 32 }}>
+                                  <SelectValue placeholder="Pick category…" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {categoryList.map((c: any) => (
+                                    <SelectItem key={c.id} value={c.id}>
+                                      {c.emoji} {c.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              {r.matched_pattern && r.suggested_category_id && (
+                                <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 3 }}>
+                                  auto · rule “{r.matched_pattern}”
+                                </div>
+                              )}
+                            </div>
                           )}
                         </td>
                       </tr>

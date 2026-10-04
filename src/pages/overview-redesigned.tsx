@@ -373,13 +373,10 @@ export default function OverviewRedesignedPage() {
     ? { start: startOfMonth(selectedDate), end: endOfMonth(selectedDate) }
     : { start: new Date(selectedDate.getFullYear(), 0, 1), end: new Date(selectedDate.getFullYear(), 11, 31) };
 
-  const { data: transactions = [] } = useQuery({
+  // Default query function routes this to the local database (date range).
+  // A raw fetch() here never reached the database in the desktop app.
+  const { data: transactions = [] } = useQuery<any[]>({
     queryKey: ["/api/transactions", dateRange.start.toISOString(), dateRange.end.toISOString()],
-    queryFn: async () => {
-      const response = await fetch(`/api/transactions?startDate=${dateRange.start.toISOString()}&endDate=${dateRange.end.toISOString()}`);
-      const data = await response.json();
-      return Array.isArray(data) ? data : [];
-    },
   });
 
   const { data: categories = [] } = useQuery<any[]>({ queryKey: ["/api/categories"] });

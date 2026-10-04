@@ -309,6 +309,12 @@ const MIGRATIONS: &[&str] = &[
             SELECT 'custom_' || lower(hex(randomblob(8))), type, section, NULL, 100, 0, 0
             FROM (SELECT DISTINCT type, section FROM categories WHERE section IS NOT NULL);
     "#,
+    // ---- v6: drop one-character auto-categorization rules ----
+    // "Remember this merchant" used to save e.g. "A" (from "A&O") or "H" (from
+    // "H&M"), which matched nearly every merchant during import.
+    r#"
+        DELETE FROM category_rules WHERE length(trim(pattern)) < 2;
+    "#,
 ];
 
 /// Apply any migrations newer than the database's current `user_version`.
