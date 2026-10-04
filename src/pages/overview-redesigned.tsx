@@ -8,7 +8,7 @@ import { TrendingUp, TrendingDown, Wallet, ChevronLeft, ChevronRight, Expand, Pi
 import { format, startOfMonth, endOfMonth, addMonths, subMonths } from "date-fns";
 import { useCurrency } from "@/hooks/useCurrency";
 import ResponsiveContainer from "@/components/layout/responsive-container";
-import { getSectionEmojiFromStorage, resolveCategorySection } from "@/lib/sectionUtils";
+import { useSections, sectionEmoji, resolveCategorySection } from "@/lib/sectionUtils";
 import {
   calculateYearOverview,
   calculateYearsProgress,
@@ -383,6 +383,7 @@ export default function OverviewRedesignedPage() {
   });
 
   const { data: categories = [] } = useQuery<any[]>({ queryKey: ["/api/categories"] });
+  const { data: allSections = [] } = useSections();
   const { data: wallets = [] } = useQuery<any[]>({ queryKey: ["/api/wallets"] });
   const { data: allTransactions = [] } = useQuery<any[]>({
     queryKey: ["/api/transactions"],
@@ -462,13 +463,13 @@ export default function OverviewRedesignedPage() {
       const categoryName = category?.name || "Other";
       // Same resolution Settings uses: DB section → manual assignment →
       // built-in membership → "Custom Categories".
-      const section = resolveCategorySection(category, categoryFlowMode);
+      const section = resolveCategorySection(category);
 
       if (!acc[section]) {
         acc[section] = {
           name: section,
           amount: 0,
-          emoji: getSectionEmojiFromStorage(section, categoryFlowMode),
+          emoji: sectionEmoji(allSections, section, categoryFlowMode),
           categories: []
         };
       }
@@ -487,7 +488,7 @@ export default function OverviewRedesignedPage() {
         fill: COLORS[index % COLORS.length]
       }))
       .sort((a, b) => b.amount - a.amount);
-  }, [transactionsArray, categoryMap, categoryFlowMode]);
+  }, [transactionsArray, categoryMap, categoryFlowMode, allSections]);
 
   const displayCategoryData = categoryViewMode === "head-categories" ? headCategoryArray : categoryData;
 

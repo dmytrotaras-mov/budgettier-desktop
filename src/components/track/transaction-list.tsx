@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { useSections, isHiddenCategory } from "@/lib/sectionUtils";
 import { useCurrency } from "@/hooks/useCurrency";
 import type { Transaction, Category, Wallet, BudgetCategoryAllocation } from "@shared/schema";
 import TransactionEditDialog from "./transaction-edit-dialog";
@@ -194,6 +195,7 @@ export default function TransactionList({ dateRange }: TransactionListProps) {
   const { data: categories = [] } = useQuery<Category[]>({
     queryKey: ["/api/categories"],
   });
+  const { data: allSections = [] } = useSections();
 
   const { data: wallets = [] } = useQuery<Wallet[]>({
     queryKey: ["/api/wallets"],
@@ -210,7 +212,7 @@ export default function TransactionList({ dateRange }: TransactionListProps) {
   const budgetAllocations = budgetData?.allocations || [];
   const budgetPlanId = budgetData?.budgetPlanId || "";
 
-  const expenseCategories = categories.filter(c => c.type === 'expense');
+  const expenseCategories = categories.filter(c => c.type === 'expense' && !isHiddenCategory(c, allSections));
 
   const getCategory = (categoryId: string | null): Category | undefined => {
     if (!categoryId) return undefined;

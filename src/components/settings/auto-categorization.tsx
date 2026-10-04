@@ -19,6 +19,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash2 } from "lucide-react";
 import type { Category } from "@shared/schema";
+import { useSections, isHiddenCategory } from "@/lib/sectionUtils";
 
 interface Rule {
   id: string;
@@ -39,6 +40,7 @@ export default function AutoCategorizationSection() {
   const { data: categories = [] } = useQuery<Category[]>({
     queryKey: ["/api/categories"],
   });
+  const { data: allSections = [] } = useSections();
 
   const createRule = useMutation({
     mutationFn: async (input: { pattern: string; categoryId: string }) => {
@@ -82,8 +84,8 @@ export default function AutoCategorizationSection() {
     createRule.mutate({ pattern: newPattern.trim(), categoryId: newCategoryId });
   };
 
-  const expenseCategories = categories.filter((c: any) => c.type === "expense");
-  const incomeCategories = categories.filter((c: any) => c.type === "income");
+  const expenseCategories = categories.filter((c: any) => c.type === "expense" && !isHiddenCategory(c, allSections));
+  const incomeCategories = categories.filter((c: any) => c.type === "income" && !isHiddenCategory(c, allSections));
 
   return (
     <div

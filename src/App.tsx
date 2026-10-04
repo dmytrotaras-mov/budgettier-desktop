@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect } from "react";
 import { Switch, Route, Redirect, useLocation } from "wouter";
 import { listen } from "@tauri-apps/api/event";
 import { checkForUpdatesOnStartup } from "./lib/updater";
+import { migrateLegacySectionsOnce } from "./lib/legacySections";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -46,6 +47,11 @@ function MenuEventBridge() {
       unlistenPromise.then((unlisten) => unlisten()).catch(() => {});
     };
   }, [navigate]);
+
+  useEffect(() => {
+    // Move any section data still in localStorage into the database (once).
+    void migrateLegacySectionsOnce(queryClient);
+  }, []);
 
   useEffect(() => {
     // Check GitHub Releases for a newer version, once, shortly after launch.

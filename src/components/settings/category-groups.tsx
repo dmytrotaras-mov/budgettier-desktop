@@ -32,7 +32,7 @@ import {
   X
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
-import { defaultSectionCategories } from "@/lib/sectionUtils";
+import { useSections, visibleSections, isHiddenCategory, SECTIONS_QUERY_KEY, type Section } from "@/lib/sectionUtils";
 
 const categoryFormSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -112,84 +112,6 @@ function getCategoryEmoji(categoryName: string): string {
   return categoryEmojis[categoryName as keyof typeof categoryEmojis] || "📋";
 }
 
-// Category groups with section structure - matching track page
-const categoryGroups = {
-  expense: [
-    {
-      id: "expense_housing_utilities",
-      name: "Housing & Utilities",
-      icon: Home,
-      emoji: "🏠",
-      categories: defaultSectionCategories["expense_housing_utilities"]
-    },
-    {
-      id: "expense_food_drinks",
-      name: "Food & Drinks",
-      icon: Utensils,
-      emoji: "🍽️",
-      categories: defaultSectionCategories["expense_food_drinks"]
-    },
-    {
-      id: "expense_transportation",
-      name: "Transportation",
-      icon: Car,
-      emoji: "🚗",
-      categories: defaultSectionCategories["expense_transportation"]
-    },
-    {
-      id: "expense_health_wellness",
-      name: "Health & Wellness",
-      icon: Heart,
-      emoji: "🏥",
-      categories: defaultSectionCategories["expense_health_wellness"]
-    },
-    {
-      id: "expense_entertainment",
-      name: "Entertainment",
-      icon: Gamepad2,
-      emoji: "🎬",
-      categories: defaultSectionCategories["expense_entertainment"]
-    },
-    {
-      id: "expense_shopping",
-      name: "Shopping",
-      icon: ShoppingBag,
-      emoji: "🛍️",
-      categories: defaultSectionCategories["expense_shopping"]
-    },
-    {
-      id: "expense_finance",
-      name: "Finance",
-      icon: CreditCard,
-      emoji: "💳",
-      categories: defaultSectionCategories["expense_finance"]
-    },
-    {
-      id: "expense_education_other",
-      name: "Education & Other",
-      icon: GraduationCap,
-      emoji: "📚",
-      categories: defaultSectionCategories["expense_education_other"]
-    }
-  ],
-  income: [
-    {
-      id: "income_primary",
-      name: "Primary Income",
-      icon: TrendingUp,
-      emoji: "💰",
-      categories: defaultSectionCategories["income_primary"]
-    },
-    {
-      id: "income_other",
-      name: "Other Income",
-      icon: DollarSign,
-      emoji: "💵",
-      categories: defaultSectionCategories["income_other"]
-    }
-  ]
-};
-
 interface CategoryGroupsProps {
   type: "income" | "expense";
 }
@@ -200,77 +122,15 @@ export default function CategoryGroups({ type }: CategoryGroupsProps) {
   const [selectedCategory, setSelectedCategory] = useState<any>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   
-  // Category section assignments - ID-based assignments (categoryName -> sectionId)
-  const [sectionAssignments, setSectionAssignments] = useState<Record<string, string>>({});
-  
-  // Custom sections storage
-  const [customSections, setCustomSections] = useState<Record<string, { name: string; icon: any; emoji?: string }>>({});
-
-  // Section overrides for default sections
-  const [sectionOverrides, setSectionOverrides] = useState<Record<string, string>>({});
-
-  // Section emoji overrides for default sections
-  const [sectionEmojiOverrides, setSectionEmojiOverrides] = useState<Record<string, string>>({});
-
-  // Queries - Must be declared before useEffects that use categories
+  // Queries
   const { data: categories = [], isLoading, error } = useQuery<any[]>({
     queryKey: [`/api/categories/${type}`],
     enabled: !!type,
   });
+  const { data: allSections = [] } = useSections();
+  // Sections of this type shown in Settings (hidden "System" group excluded).
+  const typeSections: Section[] = visibleSections(allSections, type);
 
-  // Initialize state when component mounts or type changes
-  useEffect(() => {
-    const storedAssignments = localStorage.getItem(`categoryAssignments_${type}`);
-    const storedCustomSections = localStorage.getItem(`customSections_${type}`);
-    const storedOverrides = localStorage.getItem(`sectionOverrides_${type}`);
-    const storedEmojiOverrides = localStorage.getItem(`sectionEmojiOverrides_${type}`);
-
-    setSectionAssignments(storedAssignments ? JSON.parse(storedAssignments) : {});
-    setCustomSections(storedCustomSections ? JSON.parse(storedCustomSections) : {});
-    setSectionOverrides(storedOverrides ? JSON.parse(storedOverrides) : {});
-    setSectionEmojiOverrides(storedEmojiOverrides ? JSON.parse(storedEmojiOverrides) : {});
-  }, [type]);
-
-  // Sync custom sections from database to localStorage
-  useEffect(() => {
-    if (!categories.length) return;
-
-    const filteredCategories = categories.filter(cat => cat.type === type);
-
-    // Collect unique sections from database that aren't default sections
-    const dbSections = new Set<string>();
-    filteredCategories.forEach(cat => {
-      if (cat.section && !categoryGroups[type].some(g => g.name === cat.section)) {
-        dbSections.add(cat.section);
-      }
-    });
-
-    // Check if we need to add any database sections to localStorage
-    const currentCustomSections = JSON.parse(localStorage.getItem(`customSections_${type}`) || '{}');
-    const updatedCustomSections = { ...currentCustomSections };
-    let needsUpdate = false;
-
-    dbSections.forEach(sectionName => {
-      // Check if this section already exists in localStorage
-      const existsInLocalStorage = Object.values(currentCustomSections).some((s: any) => s.name === sectionName);
-
-      if (!existsInLocalStorage) {
-        // Add this section to localStorage
-        const sectionId = `custom_${sectionName.replace(/\s+/g, '_').toLowerCase()}_${Date.now()}`;
-        updatedCustomSections[sectionId] = {
-          name: sectionName,
-          icon: "FolderOpen"
-        };
-        needsUpdate = true;
-      }
-    });
-
-    if (needsUpdate) {
-      setCustomSections(updatedCustomSections);
-      localStorage.setItem(`customSections_${type}`, JSON.stringify(updatedCustomSections));
-    }
-  }, [categories, type]);
-  
   // Section editing state
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
   const [editingSectionName, setEditingSectionName] = useState("");
@@ -279,18 +139,33 @@ export default function CategoryGroups({ type }: CategoryGroupsProps) {
   const [newSectionName, setNewSectionName] = useState("");
   const [isCreatingNewSection, setIsCreatingNewSection] = useState(false);
   const [newSectionNameInModal, setNewSectionNameInModal] = useState("");
-  
-  // Get available sections for the current type (includes both default and custom)
-  const availableSections = [
-    ...categoryGroups[type].map(group => ({
-      id: group.id,
-      label: sectionOverrides[group.id] || group.name
-    })),
-    ...Object.entries(customSections).map(([id, section]) => ({
-      id,
-      label: section.name
-    }))
-  ];
+
+  // Options for the "Section" picker in the category dialog
+  const availableSections = typeSections.map((s) => ({ id: s.id, label: s.name }));
+
+  const refreshSectionsAndCategories = () => {
+    queryClient.invalidateQueries({ queryKey: SECTIONS_QUERY_KEY });
+    queryClient.invalidateQueries({ queryKey: ["/api/categories"] });
+    queryClient.invalidateQueries({ queryKey: [`/api/categories/${type}`] });
+  };
+
+  // Create a section in the database; returns the new section's id.
+  const createSection = async (name: string): Promise<string | null> => {
+    try {
+      const res = await apiRequest("POST", "/api/sections", { type, name });
+      if (!res.ok) throw new Error(await res.text());
+      const created: Section = await res.json();
+      refreshSectionsAndCategories();
+      return created.id;
+    } catch (err: any) {
+      toast({
+        title: "Couldn't create section",
+        description: String(err?.message || err),
+        variant: "destructive",
+      });
+      return null;
+    }
+  };
 
   // Form
   const form = useForm<z.infer<typeof categoryFormSchema>>({
@@ -337,16 +212,7 @@ export default function CategoryGroups({ type }: CategoryGroupsProps) {
 
   const deleteCategoryMutation = useMutation({
     mutationFn: (id: string) => apiRequest("DELETE", `/api/categories/${id}`),
-    onSuccess: (_, deletedId) => {
-      // Clean up section assignment for deleted category
-      const deletedCategory = categories.find(cat => cat.id === deletedId);
-      if (deletedCategory && sectionAssignments[deletedCategory.name]) {
-        const newAssignments = { ...sectionAssignments };
-        delete newAssignments[deletedCategory.name];
-        setSectionAssignments(newAssignments);
-        localStorage.setItem(`categoryAssignments_${type}`, JSON.stringify(newAssignments));
-      }
-
+    onSuccess: () => {
       // Invalidate all category queries to refresh the UI immediately
       queryClient.invalidateQueries({ queryKey: ["/api/categories"] });
       queryClient.invalidateQueries({ queryKey: [`/api/categories/${type}`] });
@@ -356,100 +222,28 @@ export default function CategoryGroups({ type }: CategoryGroupsProps) {
 
   const handleEditCategory = (category: any) => {
     setSelectedCategory(category);
-
-    // Get the current section ID for this category
-    let currentSectionId = undefined;
-
-    // Priority 1: Check database section field
-    if (category.section) {
-      // Find section ID by name (could be custom or default)
-      const customSectionEntry = Object.entries(customSections).find(([_, sec]: [string, any]) => sec.name === category.section);
-      if (customSectionEntry) {
-        currentSectionId = customSectionEntry[0];
-      } else {
-        const defaultSection = categoryGroups[type].find(g => g.name === category.section);
-        if (defaultSection) {
-          currentSectionId = defaultSection.id;
-        }
-      }
-    }
-
-    // Priority 2: Check localStorage assignment
-    if (!currentSectionId && sectionAssignments[category.name]) {
-      currentSectionId = sectionAssignments[category.name];
-    }
-
+    const currentSection = typeSections.find((s) => s.name === category.section);
     form.reset({
       name: category.name,
       type: category.type,
       emoji: category.emoji || getCategoryEmoji(category.name),
-      section: currentSectionId,
+      section: currentSection?.id,
     });
-
-    // Track the original section of this category
-    const originalSectionId = getOriginalSectionId(category.name);
-    if (originalSectionId && !sectionAssignments[category.name]) {
-      const newAssignments = { ...sectionAssignments, [category.name]: originalSectionId };
-      setSectionAssignments(newAssignments);
-      localStorage.setItem(`categoryAssignments_${type}`, JSON.stringify(newAssignments));
-    }
-
     setIsDialogOpen(true);
   };
-  
-  // Helper function to get the original section ID of a category
-  const getOriginalSectionId = (categoryName: string): string | null => {
-    for (const group of categoryGroups[type]) {
-      if (group.categories.includes(categoryName)) {
-        return group.id;
-      }
-    }
-    return null;
-  };
-  
-  // Helper function to get section display name by ID
-  const getSectionDisplayName = (sectionId: string): string => {
-    // Check if it's a custom section
-    if (customSections[sectionId]) {
-      return customSections[sectionId].name;
-    }
 
-    // Check if it's a default section
-    const defaultSection = categoryGroups[type].find(group => group.id === sectionId);
-    if (defaultSection) {
-      return sectionOverrides[sectionId] || defaultSection.name;
-    }
+  const getSectionDisplayName = (sectionId: string): string =>
+    typeSections.find((s) => s.id === sectionId)?.name ?? "";
 
-    return "Unknown Section";
-  };
-
-  // Helper function to get section emoji by ID
-  const getSectionEmoji = (sectionId: string): string => {
-    // Check if it's a custom section
-    if (customSections[sectionId]) {
-      return customSections[sectionId].emoji || "📂";
-    }
-
-    // Check if it's a default section with emoji override
-    if (sectionEmojiOverrides[sectionId]) {
-      return sectionEmojiOverrides[sectionId];
-    }
-
-    // Check if it's a default section with default emoji
-    const defaultSection = categoryGroups[type].find(group => group.id === sectionId);
-    if (defaultSection) {
-      return defaultSection.emoji || "📂";
-    }
-
-    return "📂";
-  };
+  const getSectionEmoji = (sectionId: string): string =>
+    typeSections.find((s) => s.id === sectionId)?.emoji || "📂";
 
   const handleAddCategory = () => {
     setSelectedCategory(null);
     form.reset({ name: "", type: type, emoji: "📋" });
     setIsDialogOpen(true);
   };
-  
+
   // Section editing functions
   const handleEditSection = (sectionId: string, sectionName: string, sectionEmoji: string) => {
     setEditingSectionId(sectionId);
@@ -457,150 +251,87 @@ export default function CategoryGroups({ type }: CategoryGroupsProps) {
     setEditingSectionEmoji(sectionEmoji);
   };
 
-  const handleSaveSectionEdit = () => {
+  const resetSectionEdit = () => {
+    setEditingSectionId(null);
+    setEditingSectionName("");
+    setEditingSectionEmoji("");
+  };
+
+  const handleSaveSectionEdit = async () => {
     if (!editingSectionId || !editingSectionName.trim()) return;
-
-    // Check if this is a custom section
-    const isCustomSection = customSections[editingSectionId];
-
-    if (isCustomSection) {
-      // Update custom section (both name and emoji)
-      const updatedCustomSections = {
-        ...customSections,
-        [editingSectionId]: {
-          ...customSections[editingSectionId],
-          name: editingSectionName.trim(),
-          emoji: editingSectionEmoji || "📂"
-        }
-      };
-      setCustomSections(updatedCustomSections);
-      localStorage.setItem(`customSections_${type}`, JSON.stringify(updatedCustomSections));
-    } else {
-      // For default sections, store both name and emoji overrides
-      const updatedOverrides = {
-        ...sectionOverrides,
-        [editingSectionId]: editingSectionName.trim()
-      };
-      setSectionOverrides(updatedOverrides);
-      localStorage.setItem(`sectionOverrides_${type}`, JSON.stringify(updatedOverrides));
-
-      // Save emoji override separately
-      const updatedEmojiOverrides = {
-        ...sectionEmojiOverrides,
-        [editingSectionId]: editingSectionEmoji || "📂"
-      };
-      setSectionEmojiOverrides(updatedEmojiOverrides);
-      localStorage.setItem(`sectionEmojiOverrides_${type}`, JSON.stringify(updatedEmojiOverrides));
+    try {
+      // Renaming also moves this section's categories to the new name (in Rust).
+      const res = await apiRequest("PUT", `/api/sections/${editingSectionId}`, {
+        name: editingSectionName.trim(),
+        emoji: editingSectionEmoji || "",
+      });
+      if (!res.ok) throw new Error(await res.text());
+      refreshSectionsAndCategories();
+      resetSectionEdit();
+      toast({ title: "Section updated successfully" });
+    } catch (err: any) {
+      toast({
+        title: "Couldn't update section",
+        description: String(err?.message || err),
+        variant: "destructive",
+      });
     }
+  };
 
-    setEditingSectionId(null);
-    setEditingSectionName("");
-    setEditingSectionEmoji("");
-    toast({ title: "Section updated successfully" });
-  };
-  
-  const handleCancelSectionEdit = () => {
-    setEditingSectionId(null);
-    setEditingSectionName("");
-    setEditingSectionEmoji("");
-  };
+  const handleCancelSectionEdit = resetSectionEdit;
 
   const handleDeleteSection = async (sectionId: string) => {
-    // Check if this is a custom section
-    const isCustomSection = customSections[sectionId];
-
-    if (isCustomSection) {
-      const sectionName = customSections[sectionId].name;
-
-      // Find all categories in this section and update them to have no section
-      const categoriesToUpdate = categories.filter(cat =>
-        cat.type === type && cat.section === sectionName
-      );
-
-      // Update each category in the database to remove the section assignment
-      try {
-        await Promise.all(
-          categoriesToUpdate.map(cat =>
-            apiRequest("PUT", `/api/categories/${cat.id}`, { ...cat, section: null })
-          )
-        );
-
-        // Remove custom section from localStorage
-        const updatedCustomSections = { ...customSections };
-        delete updatedCustomSections[sectionId];
-        setCustomSections(updatedCustomSections);
-        localStorage.setItem(`customSections_${type}`, JSON.stringify(updatedCustomSections));
-
-        // Clean up any localStorage assignments (legacy system)
-        const newAssignments = { ...sectionAssignments };
-        Object.keys(newAssignments).forEach(categoryName => {
-          if (newAssignments[categoryName] === sectionId) {
-            delete newAssignments[categoryName];
-          }
-        });
-        setSectionAssignments(newAssignments);
-        localStorage.setItem(`categoryAssignments_${type}`, JSON.stringify(newAssignments));
-
-        // Refresh categories to show the updated data
-        queryClient.invalidateQueries({ queryKey: ["/api/categories"] });
-        queryClient.invalidateQueries({ queryKey: [`/api/categories/${type}`] });
-
+    try {
+      const res = await apiRequest("DELETE", `/api/sections/${sectionId}`);
+      if (!res.ok) throw new Error(await res.text());
+      const result: { reset: boolean; movedCategories: number } = await res.json();
+      refreshSectionsAndCategories();
+      resetSectionEdit();
+      if (result.reset) {
+        toast({ title: "Section name reset to default" });
+      } else {
         toast({
           title: "Section deleted successfully",
-          description: categoriesToUpdate.length > 0
-            ? `${categoriesToUpdate.length} ${categoriesToUpdate.length === 1 ? 'category' : 'categories'} moved to Custom Categories`
-            : undefined
-        });
-      } catch (error) {
-        toast({
-          title: "Error deleting section",
-          description: "Failed to update categories",
-          variant: "destructive"
+          description:
+            result.movedCategories > 0
+              ? `${result.movedCategories} ${result.movedCategories === 1 ? "category" : "categories"} moved to Custom Categories`
+              : undefined,
         });
       }
-    } else {
-      // For default sections, remove the override (if any)
-      const updatedOverrides = { ...sectionOverrides };
-      delete updatedOverrides[sectionId];
-      setSectionOverrides(updatedOverrides);
-      localStorage.setItem(`sectionOverrides_${type}`, JSON.stringify(updatedOverrides));
-      
-      toast({ title: "Section name reset to default" });
+    } catch (err: any) {
+      toast({
+        title: "Couldn't delete section",
+        description: String(err?.message || err),
+        variant: "destructive",
+      });
     }
-    
-    // Exit edit mode
-    setEditingSectionId(null);
-    setEditingSectionName("");
   };
-  
-  const handleAddNewSection = () => {
+
+  const handleAddNewSection = async () => {
     if (!newSectionName.trim()) return;
-    
-    const sectionId = `custom_${Date.now()}`;
-    const newSection = {
-      name: newSectionName.trim(),
-      icon: "FolderOpen" // Default icon for custom sections
-    };
-    
-    const updatedCustomSections = {
-      ...customSections,
-      [sectionId]: newSection
-    };
-    
-    setCustomSections(updatedCustomSections);
-    localStorage.setItem(`customSections_${type}`, JSON.stringify(updatedCustomSections));
-    
+    const id = await createSection(newSectionName.trim());
+    if (!id) return;
     setNewSectionName("");
     setIsAddingSectionOpen(false);
     toast({ title: "New section added successfully" });
   };
 
+  // Create a section from inside the category dialog and select it.
+  const handleCreateSectionInModal = async (onSelect: (id: string) => void) => {
+    const name = newSectionNameInModal.trim();
+    if (!name) return;
+    const id = await createSection(name);
+    if (!id) return;
+    onSelect(id);
+    setNewSectionNameInModal("");
+    setIsCreatingNewSection(false);
+  };
+
   const onSubmit = (data: z.infer<typeof categoryFormSchema>) => {
-    // Prepare data for backend - convert section ID to section name for database
-    // IMPORTANT: Always save the section NAME to the database, not the ID
+    // The database stores the section NAME on the category ("" clears it).
     const backendData = {
       ...data,
-      section: data.section ? getSectionDisplayName(data.section) : undefined
+      section: data.section ? getSectionDisplayName(data.section) || null : null,
     };
 
     if (selectedCategory) {
@@ -616,75 +347,24 @@ export default function CategoryGroups({ type }: CategoryGroupsProps) {
     }
   };
 
-  // Filter categories by type first
-  const filteredCategories = categories.filter(cat => cat.type === type);
+  // Categories of this type; internal ones (hidden "System" section) excluded.
+  const filteredCategories = categories.filter(
+    (cat) => cat.type === type && !isHiddenCategory(cat, allSections),
+  );
 
-  // Group categories by their groups - use database section field as primary source
-  const defaultGroupedCategories = categoryGroups[type].map(group => {
-    const groupCategories = filteredCategories.filter(cat => {
-      // If category has a database section assigned, ONLY match that section
-      if (cat.section) {
-        return cat.section === group.name;
-      }
+  // One card per section, in the order stored in the database.
+  const groupedCategories = typeSections.map((section) => ({
+    groupName: section.name,
+    categories: filteredCategories.filter((cat) => cat.section === section.name),
+    isCustom: !section.isDefault,
+    sectionId: section.id,
+  }));
 
-      // If category has localStorage assignment, ONLY match that section
-      if (sectionAssignments[cat.name]) {
-        return sectionAssignments[cat.name] === group.id;
-      }
-
-      // Only include default categories if they don't have any section assigned
-      const isDefaultCategory = group.categories.some(defaultCat => cat.name === defaultCat);
-      return isDefaultCategory;
-    });
-    // Use override name if available, otherwise use default name
-    const displayName = sectionOverrides[group.id] || group.name;
-    return {
-      groupName: displayName,
-      group,
-      categories: groupCategories,
-      isCustom: false,
-      sectionId: group.id
-    };
-  });
-
-  // Add custom sections from localStorage (now includes sections synced from database)
-  const customGroupedCategories = Object.entries(customSections).map(([sectionId, section]) => {
-    const groupCategories = filteredCategories.filter(cat => {
-      // If category has a database section assigned, ONLY match that section by name
-      if (cat.section) {
-        return cat.section === section.name;
-      }
-
-      // If category has localStorage assignment, ONLY match that section by ID
-      if (sectionAssignments[cat.name]) {
-        return sectionAssignments[cat.name] === sectionId;
-      }
-
-      // Don't include categories without assignments in custom sections
-      return false;
-    });
-    return {
-      groupName: section.name,
-      group: { icon: FolderOpen, categories: [] },
-      categories: groupCategories,
-      isCustom: true,
-      sectionId
-    };
-  });
-
-  const groupedCategories = [...defaultGroupedCategories, ...customGroupedCategories];
-
-  // Categories not in any group (custom categories) - exclude those with section assignments or db section
-  const ungroupedCategories = filteredCategories.filter(cat => {
-    const isDefaultCategory = categoryGroups[type].some(group =>
-      group.categories.includes(cat.name)
-    );
-    // PRIORITY 1: Database section field
-    const hasDbSection = cat.section;
-    // PRIORITY 2: localStorage assignment
-    const hasAssignment = sectionAssignments[cat.name];
-    return !isDefaultCategory && !hasDbSection && !hasAssignment;
-  });
+  // No section (or a section that no longer exists) → "Custom Categories".
+  const sectionNames = new Set(typeSections.map((s) => s.name));
+  const ungroupedCategories = filteredCategories.filter(
+    (cat) => !cat.section || !sectionNames.has(cat.section),
+  );
 
   // Add loading and error states
   if (isLoading) {
@@ -844,38 +524,14 @@ export default function CategoryGroups({ type }: CategoryGroupsProps) {
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter') {
                                   e.preventDefault();
-                                  if (newSectionNameInModal.trim()) {
-                                    const sectionId = `custom_${newSectionNameInModal.replace(/\s+/g, '_').toLowerCase()}_${Date.now()}`;
-                                    const updatedSections = {
-                                      ...customSections,
-                                      [sectionId]: { name: newSectionNameInModal.trim(), icon: "FolderOpen" }
-                                    };
-                                    setCustomSections(updatedSections);
-                                    localStorage.setItem(`customSections_${type}`, JSON.stringify(updatedSections));
-                                    field.onChange(sectionId);
-                                    setNewSectionNameInModal("");
-                                    setIsCreatingNewSection(false);
-                                  }
+                                  void handleCreateSectionInModal(field.onChange);
                                 }
                               }}
                             />
                             <Button
                               type="button"
                               size="sm"
-                              onClick={() => {
-                                if (newSectionNameInModal.trim()) {
-                                  const sectionId = `custom_${newSectionNameInModal.replace(/\s+/g, '_').toLowerCase()}_${Date.now()}`;
-                                  const updatedSections = {
-                                    ...customSections,
-                                    [sectionId]: { name: newSectionNameInModal.trim(), icon: "FolderOpen" }
-                                  };
-                                  setCustomSections(updatedSections);
-                                  localStorage.setItem(`customSections_${type}`, JSON.stringify(updatedSections));
-                                  field.onChange(sectionId);
-                                  setNewSectionNameInModal("");
-                                  setIsCreatingNewSection(false);
-                                }
-                              }}
+                              onClick={() => void handleCreateSectionInModal(field.onChange)}
                             >
                               Add
                             </Button>
@@ -934,7 +590,7 @@ export default function CategoryGroups({ type }: CategoryGroupsProps) {
         </Dialog>
 
       {/* Grouped Categories */}
-      {groupedCategories.map(({ groupName, group, categories: groupCategories, isCustom, sectionId }) => (
+      {groupedCategories.map(({ groupName, categories: groupCategories, sectionId }) => (
         <Card key={sectionId} className="bg-white !shadow-none border-4 border-white rounded-2xl group/section">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center justify-between text-base">

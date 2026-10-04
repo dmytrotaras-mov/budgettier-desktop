@@ -49,6 +49,22 @@ export async function callBackend(
       break;
     }
 
+    // ---- sections ----
+    case "sections": {
+      if (method === "GET" && !a) return invoke("get_sections");
+      if (method === "POST" && !a) return invoke("create_section", { input: body });
+      if ((method === "PUT" || method === "PATCH") && a)
+        return invoke("update_section", { id: a, input: body });
+      if (method === "DELETE" && a) return invoke("delete_section", { id: a });
+      break;
+    }
+
+    // ---- recent categories (derived from transaction history) ----
+    case "recent-categories": {
+      if (method === "GET" && a) return invoke("get_recent_categories", { typeFilter: a });
+      break;
+    }
+
     // ---- opening balance ----
     case "opening-balance": {
       // GET  /api/opening-balance/:walletId          -> current opening (or null)

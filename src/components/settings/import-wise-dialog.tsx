@@ -34,6 +34,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileUp, AlertCircle, AlertTriangle } from "lucide-react";
 import type { Wallet, Category } from "@shared/schema";
+import { useSections, isHiddenCategory } from "@/lib/sectionUtils";
 
 interface PreviewRow {
   external_id: string;
@@ -89,9 +90,10 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
 
   const { data: wallets = [] } = useQuery<Wallet[]>({ queryKey: ["/api/wallets"] });
   const { data: categories = [] } = useQuery<Category[]>({ queryKey: ["/api/categories"] });
+  const { data: allSections = [] } = useSections();
 
-  const expenseCategories = categories.filter((c: any) => c.type === "expense");
-  const incomeCategories = categories.filter((c: any) => c.type === "income");
+  const expenseCategories = categories.filter((c: any) => c.type === "expense" && !isHiddenCategory(c, allSections));
+  const incomeCategories = categories.filter((c: any) => c.type === "income" && !isHiddenCategory(c, allSections));
 
   const reset = () => {
     setStage("pick");

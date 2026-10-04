@@ -55,6 +55,12 @@ pub fn run() {
             commands::opening_balance::get_opening_balance,
             commands::opening_balance::set_opening_balance,
             commands::opening_balance::suggest_opening_date,
+            commands::sections::get_sections,
+            commands::sections::create_section,
+            commands::sections::update_section,
+            commands::sections::delete_section,
+            commands::sections::get_recent_categories,
+            commands::sections::import_legacy_sections,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

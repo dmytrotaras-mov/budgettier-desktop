@@ -219,10 +219,100 @@ const MIGRATIONS: &[&str] = &[
         ALTER TABLE transactions ADD COLUMN is_opening INTEGER NOT NULL DEFAULT 0;
         CREATE INDEX IF NOT EXISTS idx_transactions_is_opening ON transactions(is_opening);
     "#,
+    // ---- v5: sections live in the database ----
+    // Previously sections (names, emojis, custom groups) lived in the webview's
+    // localStorage and many categories had no section at all — their group was
+    // inferred from a built-in name list. Now:
+    //   * every section is a row here (built-in ones flagged is_default)
+    //   * categories.section holds the section NAME (renames cascade in code)
+    //   * built-in membership is written onto categories once, right here
+    // "System" is a hidden section for internal categories (Opening Balance).
+    r#"
+        CREATE TABLE IF NOT EXISTS sections (
+            id           TEXT PRIMARY KEY,
+            type         TEXT NOT NULL,
+            name         TEXT NOT NULL,
+            emoji        TEXT,
+            sort_order   INTEGER NOT NULL DEFAULT 0,
+            is_default   INTEGER NOT NULL DEFAULT 0,
+            hidden       INTEGER NOT NULL DEFAULT 0,
+            default_name TEXT
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_sections_type_name ON sections(type, name);
+
+        INSERT OR IGNORE INTO sections (id, type, name, emoji, sort_order, is_default, hidden, default_name) VALUES
+            ('expense_housing_utilities', 'expense', 'Housing & Utilities', '🏠', 0, 1, 0, 'Housing & Utilities'),
+            ('expense_food_drinks',       'expense', 'Food & Drinks',       '🍽️', 1, 1, 0, 'Food & Drinks'),
+            ('expense_transportation',    'expense', 'Transportation',      '🚗', 2, 1, 0, 'Transportation'),
+            ('expense_health_wellness',   'expense', 'Health & Wellness',   '🏥', 3, 1, 0, 'Health & Wellness'),
+            ('expense_entertainment',     'expense', 'Entertainment',       '🎬', 4, 1, 0, 'Entertainment'),
+            ('expense_shopping',          'expense', 'Shopping',            '🛍️', 5, 1, 0, 'Shopping'),
+            ('expense_finance',           'expense', 'Finance',             '💳', 6, 1, 0, 'Finance'),
+            ('expense_education_other',   'expense', 'Education & Other',   '📚', 7, 1, 0, 'Education & Other'),
+            ('income_primary',            'income',  'Primary Income',      '💰', 0, 1, 0, 'Primary Income'),
+            ('income_other',              'income',  'Other Income',        '💵', 1, 1, 0, 'Other Income'),
+            ('expense_system',            'expense', 'System',              '⚙️', 999, 1, 1, 'System'),
+            ('income_system',             'income',  'System',              '⚙️', 999, 1, 1, 'System');
+
+        UPDATE categories SET section = CASE name
+            WHEN 'Rent/Mortgage'       THEN 'Housing & Utilities'
+            WHEN 'Electricity'         THEN 'Housing & Utilities'
+            WHEN 'Water'               THEN 'Housing & Utilities'
+            WHEN 'Gas/Heating'         THEN 'Housing & Utilities'
+            WHEN 'Internet/Phone'      THEN 'Housing & Utilities'
+            WHEN 'Groceries'           THEN 'Food & Drinks'
+            WHEN 'Restaurants/Cafes'   THEN 'Food & Drinks'
+            WHEN 'Food Delivery'       THEN 'Food & Drinks'
+            WHEN 'Public Transport'    THEN 'Transportation'
+            WHEN 'Fuel/Gas'            THEN 'Transportation'
+            WHEN 'Taxi/Ride Sharing'   THEN 'Transportation'
+            WHEN 'Car Maintenance'     THEN 'Transportation'
+            WHEN 'Health Insurance'    THEN 'Health & Wellness'
+            WHEN 'Doctor/Dentist'      THEN 'Health & Wellness'
+            WHEN 'Medicine'            THEN 'Health & Wellness'
+            WHEN 'Gym/Fitness'         THEN 'Health & Wellness'
+            WHEN 'Subscriptions'       THEN 'Entertainment'
+            WHEN 'Hobbies'             THEN 'Entertainment'
+            WHEN 'Travel'              THEN 'Entertainment'
+            WHEN 'Events/Cinema'       THEN 'Entertainment'
+            WHEN 'Clothes/Shoes'       THEN 'Shopping'
+            WHEN 'Home Goods'          THEN 'Shopping'
+            WHEN 'Loans/Credit'        THEN 'Finance'
+            WHEN 'Savings/Investments' THEN 'Finance'
+            WHEN 'Insurance'           THEN 'Finance'
+            WHEN 'Education'           THEN 'Education & Other'
+            WHEN 'Gifts/Charity'       THEN 'Education & Other'
+            WHEN 'Miscellaneous'       THEN 'Education & Other'
+        END
+        WHERE type = 'expense' AND section IS NULL AND name IN (
+            'Rent/Mortgage','Electricity','Water','Gas/Heating','Internet/Phone',
+            'Groceries','Restaurants/Cafes','Food Delivery',
+            'Public Transport','Fuel/Gas','Taxi/Ride Sharing','Car Maintenance',
+            'Health Insurance','Doctor/Dentist','Medicine','Gym/Fitness',
+            'Subscriptions','Hobbies','Travel','Events/Cinema',
+            'Clothes/Shoes','Home Goods',
+            'Loans/Credit','Savings/Investments','Insurance',
+            'Education','Gifts/Charity','Miscellaneous');
+
+        UPDATE categories SET section = CASE name
+            WHEN 'Salary'        THEN 'Primary Income'
+            WHEN 'Freelance'     THEN 'Primary Income'
+            WHEN 'Business'      THEN 'Primary Income'
+            WHEN 'Investments'   THEN 'Other Income'
+            WHEN 'Rental Income' THEN 'Other Income'
+            WHEN 'Other Income'  THEN 'Other Income'
+        END
+        WHERE type = 'income' AND section IS NULL AND name IN (
+            'Salary','Freelance','Business','Investments','Rental Income','Other Income');
+
+        INSERT OR IGNORE INTO sections (id, type, name, emoji, sort_order, is_default, hidden)
+            SELECT 'custom_' || lower(hex(randomblob(8))), type, section, NULL, 100, 0, 0
+            FROM (SELECT DISTINCT type, section FROM categories WHERE section IS NOT NULL);
+    "#,
 ];
 
 /// Apply any migrations newer than the database's current `user_version`.
-fn migrate(conn: &Connection) -> rusqlite::Result<()> {
+pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let current: i64 =
         conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     let target = MIGRATIONS.len() as i64;

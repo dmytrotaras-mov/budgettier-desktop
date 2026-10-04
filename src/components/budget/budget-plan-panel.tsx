@@ -12,7 +12,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useCurrency } from "@/hooks/useCurrency";
 import type { Transaction, Category, BudgetCategoryAllocation } from "@shared/schema";
 import CategorySelector from "@/components/track/category-selector-redesigned";
-import { defaultSectionNames, resolveCategorySection, UNGROUPED_SECTION_NAME } from "@/lib/sectionUtils";
+import { useSections, visibleSections, resolveCategorySection, isHiddenCategory, UNGROUPED_SECTION_NAME } from "@/lib/sectionUtils";
 
 // Category emojis and sections mapping
 const categoryEmojis = {
@@ -55,6 +55,7 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
   const { data: categories = [] } = useQuery<Category[]>({
     queryKey: ["/api/categories"],
   });
+  const { data: allSections = [] } = useSections();
 
   const { data: budgetData, isLoading: isBudgetLoading } = useQuery<{ budgetPlanId: string; allocations: BudgetCategoryAllocation[] }>({
     queryKey: ["/api/budget-allocations/current-month"],
@@ -62,7 +63,7 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
 
   const budgetAllocations = budgetData?.allocations || [];
   const budgetPlanId = budgetData?.budgetPlanId || "";
-  const expenseCategories = categories.filter(c => c.type === 'expense');
+  const expenseCategories = categories.filter(c => c.type === 'expense' && !isHiddenCategory(c, allSections));
 
   const getCategoryEmoji = (category: Category) => {
     // Use the category's emoji from database first, fallback to hardcoded mapping for legacy categories
@@ -78,9 +79,7 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
   const getSortedBudgetAllocations = () => {
     // Built-in sections first (in Settings order), then custom sections,
     // then ungrouped "Custom Categories" last.
-    const sectionOrder = Object.keys(defaultSectionNames)
-      .filter((id) => id.startsWith("expense"))
-      .map((id) => defaultSectionNames[id]);
+    const sectionOrder = visibleSections(allSections, "expense").map((s) => s.name);
     const sectionRank = (section: string) => {
       if (section === UNGROUPED_SECTION_NAME) return 1000;
       const idx = sectionOrder.indexOf(section);
@@ -97,7 +96,7 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
         const budget = parseFloat(allocation.allocatedAmount);
         const remaining = budget - spent;
         // Same section resolution Settings and Overview use.
-        const section = resolveCategorySection(category, "expense");
+        const section = resolveCategorySection(category);
 
         return { allocation, category, spent, budget, remaining, section };
       })

@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { useQuery } from "@tanstack/react-query";
 import { Search, ChevronDown, Tag } from "lucide-react";
 import type { Category } from "@shared/schema";
+import { useSections, visibleSections, isHiddenCategory, UNGROUPED_SECTION_NAME } from "@/lib/sectionUtils";
 
 // Category emojis mapping
 const categoryEmojis = {
@@ -71,63 +72,6 @@ const categoryEmojis = {
   "Other Income": "💵",
 };
 
-const categoryGroups = {
-  expense: [
-    {
-      id: "expense_housing_utilities",
-      name: "Housing & Utilities",
-      categories: ["Rent/Mortgage", "Electricity", "Water", "Gas/Heating", "Internet/Phone"]
-    },
-    {
-      id: "expense_food_drinks",
-      name: "Food & Drinks",
-      categories: ["Groceries", "Restaurants/Cafes", "Food Delivery"]
-    },
-    {
-      id: "expense_transportation",
-      name: "Transportation",
-      categories: ["Public Transport", "Fuel/Gas", "Taxi/Ride Sharing", "Car Maintenance"]
-    },
-    {
-      id: "expense_health_wellness",
-      name: "Health & Wellness",
-      categories: ["Health Insurance", "Doctor/Dentist", "Medicine", "Gym/Fitness"]
-    },
-    {
-      id: "expense_entertainment",
-      name: "Entertainment",
-      categories: ["Subscriptions", "Hobbies", "Travel", "Events/Cinema"]
-    },
-    {
-      id: "expense_shopping",
-      name: "Shopping",
-      categories: ["Clothes/Shoes", "Home Goods", "Electronics", "Personal Care"]
-    },
-    {
-      id: "expense_finance",
-      name: "Finance",
-      categories: ["Loans/Credit", "Savings/Investments", "Insurance", "Bank Fees"]
-    },
-    {
-      id: "expense_education_other",
-      name: "Education & Other",
-      categories: ["Education", "Gifts/Charity", "Miscellaneous"]
-    }
-  ],
-  income: [
-    {
-      id: "income_primary",
-      name: "Primary Income",
-      categories: ["Salary", "Freelance", "Business"]
-    },
-    {
-      id: "income_other",
-      name: "Other Income",
-      categories: ["Investments", "Rental Income", "Other Income"]
-    }
-  ]
-};
-
 interface CategorySelectorProps {
   value: string;
   onValueChange: (value: string) => void;
@@ -139,33 +83,13 @@ export default function CategorySelector({ value, onValueChange, type, disabled 
   const [searchTerm, setSearchTerm] = useState("");
   const [isOpen, setIsOpen] = useState(false);
 
-  // Category section assignments - ID-based assignments (categoryName -> sectionId)
-  const [sectionAssignments, setSectionAssignments] = useState<Record<string, string>>({});
-
-  // Custom sections storage
-  const [customSections, setCustomSections] = useState<Record<string, { name: string; icon: any }>>({});
-
-  // Section overrides for default sections
-  const [sectionOverrides, setSectionOverrides] = useState<Record<string, string>>({});
-
-  // Recent categories storage
-  const [recentCategories, setRecentCategories] = useState<string[]>([]);
-  
-  // Initialize state when component mounts or type changes
-  useEffect(() => {
-    const storedAssignments = localStorage.getItem(`categoryAssignments_${type}`);
-    const storedCustomSections = localStorage.getItem(`customSections_${type}`);
-    const storedOverrides = localStorage.getItem(`sectionOverrides_${type}`);
-    const storedRecentCategories = localStorage.getItem(`recentCategories_${type}`);
-
-    setSectionAssignments(storedAssignments ? JSON.parse(storedAssignments) : {});
-    setCustomSections(storedCustomSections ? JSON.parse(storedCustomSections) : {});
-    setSectionOverrides(storedOverrides ? JSON.parse(storedOverrides) : {});
-    setRecentCategories(storedRecentCategories ? JSON.parse(storedRecentCategories) : []);
-  }, [type]);
-  
   const { data: categories = [] } = useQuery<Category[]>({
     queryKey: ["/api/categories", type],
+  });
+  const { data: allSections = [] } = useSections();
+  // Recently used categories, derived from transaction history.
+  const { data: recentCategoryIds = [] } = useQuery<string[]>({
+    queryKey: [`/api/recent-categories/${type}`],
   });
 
   const selectedCategory = categories.find(c => c.id === value);
@@ -175,105 +99,40 @@ export default function CategorySelector({ value, onValueChange, type, disabled 
     return category.emoji || categoryEmojis[category.name as keyof typeof categoryEmojis] || "📋";
   };
 
-  // Helper function to get section display name by ID
-  const getSectionDisplayName = (sectionId: string): string => {
-    // Check if it's a custom section
-    if (customSections[sectionId]) {
-      return customSections[sectionId].name;
-    }
-    
-    // Check if it's a default section
-    const defaultSection = categoryGroups[type].find(group => group.id === sectionId);
-    if (defaultSection) {
-      return sectionOverrides[sectionId] || defaultSection.name;
-    }
-    
-    return "Unknown Section";
-  };
-
-  // Create dynamic groups that combine default sections and custom sections
+  // Groups = visible sections of this type (database order), then
+  // "Custom Categories" for categories without a section. Internal categories
+  // in hidden sections (e.g. Opening Balance) are never offered.
   const dynamicGroups = useMemo(() => {
-    // Filter categories by type first
-    const filteredCategories = categories.filter(cat => cat.type === type);
-    
-    // Create default groups with section assignments and overrides
-    const defaultGroupedCategories = categoryGroups[type].map(group => {
-      const groupCategories = filteredCategories.filter(cat => {
-        // If category has a database section assigned, ONLY match that section
-        if (cat.section) {
-          return cat.section === group.name;
-        }
-
-        // If category has localStorage assignment, ONLY match that section
-        if (sectionAssignments[cat.name]) {
-          return sectionAssignments[cat.name] === group.id;
-        }
-
-        // Only include default categories if they don't have any section assigned
-        const isDefaultCategory = group.categories.some(defaultCat => cat.name === defaultCat);
-        return isDefaultCategory;
-      });
-      
-      // Use override name if available, otherwise use default name
-      const displayName = sectionOverrides[group.id] || group.name;
-      return { 
-        id: group.id,
-        name: displayName, 
-        categories: groupCategories.map(cat => cat.name)
-      };
-    });
-    
-    // Add custom sections
-    const customGroupedCategories = Object.entries(customSections).map(([sectionId, section]) => {
-      const groupCategories = filteredCategories.filter(cat => {
-        // If category has a database section assigned, ONLY match that section by name
-        if (cat.section) {
-          return cat.section === section.name;
-        }
-
-        // If category has localStorage assignment, ONLY match that section by ID
-        if (sectionAssignments[cat.name]) {
-          return sectionAssignments[cat.name] === sectionId;
-        }
-
-        // Don't include categories without assignments in custom sections
-        return false;
-      });
-      return { 
-        id: sectionId,
-        name: section.name, 
-        categories: groupCategories.map(cat => cat.name)
-      };
-    });
-    
-    const allGroups = [...defaultGroupedCategories, ...customGroupedCategories];
-    
-    // Categories not in any group (custom categories) - exclude those with section assignments
-    const ungroupedCategories = filteredCategories.filter(cat => {
-      // If category has database section or localStorage assignment, it's grouped
-      if (cat.section || sectionAssignments[cat.name]) {
-        return false;
-      }
-
-      // If it's a default category (in the hardcoded list), it's grouped
-      const isDefaultCategory = categoryGroups[type].some(group =>
-        group.categories.includes(cat.name)
-      );
-
-      return !isDefaultCategory;
-    });
-    
-    // Add ungrouped categories as a separate section if they exist
-    if (ungroupedCategories.length > 0) {
-      allGroups.push({
+    const typeCategories = categories.filter(
+      (cat) => cat.type === type && !isHiddenCategory(cat, allSections),
+    );
+    const sections = visibleSections(allSections, type);
+    const groups = sections.map((section) => ({
+      id: section.id,
+      name: section.name,
+      categories: typeCategories.filter((cat) => cat.section === section.name).map((cat) => cat.name),
+    }));
+    const sectionNames = new Set(sections.map((s) => s.name));
+    const ungrouped = typeCategories.filter((cat) => !cat.section || !sectionNames.has(cat.section));
+    if (ungrouped.length > 0) {
+      groups.push({
         id: "custom_categories",
-        name: "Custom Categories",
-        categories: ungroupedCategories.map(cat => cat.name)
+        name: UNGROUPED_SECTION_NAME,
+        categories: ungrouped.map((cat) => cat.name),
       });
     }
-    
-    return allGroups;
-  }, [categories, type, sectionAssignments, customSections, sectionOverrides]);
+    return groups;
+  }, [categories, allSections, type]);
+
+  // Recent picks, limited to categories that are still selectable here.
+  const recentCategories = useMemo(() => {
+    const selectable = new Set(
+      categories
+        .filter((cat) => cat.type === type && !isHiddenCategory(cat, allSections))
+        .map((cat) => cat.id),
+    );
+    return recentCategoryIds.filter((id) => selectable.has(id));
+  }, [recentCategoryIds, categories, allSections, type]);
 
   // Filter categories based on search term
   const filteredGroups = useMemo(() => {
@@ -289,11 +148,6 @@ export default function CategorySelector({ value, onValueChange, type, disabled 
 
   const handleCategorySelect = (categoryId: string) => {
     onValueChange(categoryId);
-
-    // Update recent categories
-    const updatedRecent = [categoryId, ...recentCategories.filter(id => id !== categoryId)].slice(0, 5);
-    setRecentCategories(updatedRecent);
-    localStorage.setItem(`recentCategories_${type}`, JSON.stringify(updatedRecent));
 
     handleClose();
   };
