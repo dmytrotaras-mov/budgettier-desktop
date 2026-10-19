@@ -29,6 +29,7 @@ import { useCurrency } from "@/hooks/useCurrency";
 import type { Transaction, Category, Wallet, BudgetCategoryAllocation } from "@shared/schema";
 import TransactionEditDialog from "./transaction-edit-dialog";
 import StartingBalanceDialog from "@/components/wallets/starting-balance-dialog";
+import { displayMerchantName } from "@/lib/merchantName";
 
 // Category emojis mapping (same as in category selector)
 const categoryEmojis = {
@@ -769,8 +770,8 @@ export default function TransactionList({ dateRange }: TransactionListProps) {
                       <span className="text-lg sm:text-xl">{emoji}</span>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-mono-black truncate">
-                        {transaction.description || (isTransfer ? `${fromWalletName} → ${toWalletName}` : categoryName)}
+                      <p className="text-sm font-medium text-mono-black truncate" title={transaction.description || undefined}>
+                        {displayMerchantName(transaction.description) || (isTransfer ? `${fromWalletName} → ${toWalletName}` : categoryName)}
                       </p>
                       <p className="text-xs sm:text-xs text-mono-gray-600">
                         {isTransfer ? (

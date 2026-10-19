@@ -2,13 +2,14 @@ import { useState, useMemo, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer as RechartsResponsiveContainer } from "recharts";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer as RechartsResponsiveContainer } from "recharts";
 import { Checkbox } from "@/components/ui/checkbox";
 import { TrendingUp, TrendingDown, Wallet, ChevronLeft, ChevronRight, Expand, PiggyBank, ChevronDown, Check } from "lucide-react";
 import { format, startOfMonth, endOfMonth, addMonths, subMonths } from "date-fns";
 import { useCurrency } from "@/hooks/useCurrency";
 import ResponsiveContainer from "@/components/layout/responsive-container";
 import { useSections, sectionEmoji, resolveCategorySection } from "@/lib/sectionUtils";
+import { CategoryBreakdown, breakdownColor } from "@/components/overview/category-breakdown";
 import {
   calculateYearOverview,
   calculateYearsProgress,
@@ -248,86 +249,11 @@ function renderExpandedPanel(panelId: string, data: any, formatCurrency: (amount
             </span>
           </div>
 
-          {/* Chart-first layout: Chart left (60%), List right (40%) on desktop */}
-          <div className="grid grid-cols-1 lg:grid-cols-[1.5fr,1fr] gap-6 md:gap-8">
-            {/* Pie Chart - Hero Element */}
-            <div className="flex flex-col items-center justify-center min-h-[320px] lg:min-h-[450px]">
-              <RechartsResponsiveContainer width="100%" height={320} className="lg:!h-[450px]">
-                <PieChart>
-                  <Pie
-                    data={displayData}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    label={false}
-                    outerRadius="90%"
-                    fill="#8884d8"
-                    dataKey="amount"
-                  >
-                    {displayData.map((entry: any, index: number) => (
-                      <Cell key={`cell-${index}`} fill={data.COLORS[index % data.COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    content={({ active, payload }: any) => {
-                      if (active && payload && payload.length) {
-                        const data = payload[0].payload;
-                        return (
-                          <div
-                            style={{
-                              backgroundColor: 'white',
-                              border: '1px solid #e5e7eb',
-                              borderRadius: '8px',
-                              padding: '8px 12px',
-                              fontSize: '13px',
-                            }}
-                          >
-                            <p style={{ margin: 0, fontWeight: 500 }}>
-                              {data.emoji || '💰'} {data.name}: {formatCurrency(Number(data.amount))}
-                            </p>
-                          </div>
-                        );
-                      }
-                      return null;
-                    }}
-                  />
-                </PieChart>
-              </RechartsResponsiveContainer>
-
-              {/* Legend below chart */}
-              <div className="grid grid-cols-2 gap-x-4 gap-y-2 mt-4 w-full max-w-md">
-                {displayData.slice(0, 8).map((category: any, index: number) => (
-                  <div key={category.name} className="flex items-center gap-2">
-                    <div
-                      className="w-3 h-3 rounded-sm flex-shrink-0"
-                      style={{ backgroundColor: data.COLORS[index % data.COLORS.length] }}
-                    />
-                    <span className="text-xs text-gray-700 truncate">{category.name}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Category List - All categories with scroll */}
-            <div className="flex flex-col max-h-[450px] overflow-y-auto pr-2">
-              <div className="space-y-2.5">
-                {displayData.map((category: any, index: number) => (
-                  <div key={category.name} className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                      <span className="text-xl flex-shrink-0">{category.emoji || '💰'}</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium text-gray-900 text-sm truncate">{category.name}</div>
-                        <div className="text-xs text-gray-500">
-                          {((category.amount / data.totalExpenses) * 100).toFixed(1)}%
-                        </div>
-                      </div>
-                    </div>
-                    <span className="text-sm font-bold text-gray-900 flex-shrink-0 ml-3">{formatCurrency(category.amount)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
+          <CategoryBreakdown
+            items={displayData}
+            formatCurrency={formatCurrency}
+            flowLabel={data.categoryFlowMode === "income" ? "income" : "expenses"}
+          />
         </div>
       );
     }
@@ -437,15 +363,12 @@ export default function OverviewRedesignedPage() {
     return acc;
   }, [transactionsArray, categoryMap, categoryFlowMode]);
 
-  const COLORS = ["#3B82F6", "#10B981", "#EF4444", "#F97316", "#8B5CF6", "#06B6D4", "#EC4899", "#EAB308", "#6366F1"];
-
   const categoryData = useMemo(() =>
     Object.values(categorySpending)
-      .map((cat: any, index: number) => ({
+      .map((cat: any) => ({
         name: cat.name,
         amount: Number(cat.amount),
-        emoji: cat.emoji,
-        fill: COLORS[index % COLORS.length]
+        emoji: cat.emoji
       }))
       .sort((a: any, b: any) => b.amount - a.amount),
     [categorySpending]
@@ -478,11 +401,10 @@ export default function OverviewRedesignedPage() {
     }
 
     return Object.values(acc)
-      .map((section, index) => ({
+      .map((section) => ({
         name: section.name,
         amount: Number(section.amount),
-        emoji: section.emoji,
-        fill: COLORS[index % COLORS.length]
+        emoji: section.emoji
       }))
       .sort((a, b) => b.amount - a.amount);
   }, [transactionsArray, categoryMap, categoryFlowMode, allSections]);
@@ -982,12 +904,13 @@ export default function OverviewRedesignedPage() {
                     <p style={{ color: '#9CA3AF', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>
                       No {categoryFlowMode} transactions in this period.
                     </p>
-                  ) : displayCategoryData.slice(0, 5).map((category) => {
+                  ) : displayCategoryData.slice(0, 5).map((category, index) => {
                     const totalForPercent = categoryFlowMode === "expense" ? totalExpenses : totalIncome;
                     const percent = totalForPercent > 0 ? (category.amount / totalForPercent) * 100 : 0;
                     return (
                       <div key={category.name} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors">
                         <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <span className="w-1 self-stretch rounded-full flex-shrink-0" style={{ backgroundColor: breakdownColor(index) }} />
                           <span className="text-2xl flex-shrink-0">{category.emoji}</span>
                           <div className="flex-1 min-w-0">
                             <div className="text-sm font-semibold text-gray-900">{category.name}</div>
@@ -1135,7 +1058,7 @@ export default function OverviewRedesignedPage() {
               setModalCategoryDropdownOpen,
               totalIncome,
               totalExpenses,
-              COLORS,
+              categoryFlowMode,
               chartDataVisibility,
               toggleDataSeries,
               panel2ChartVisibility,

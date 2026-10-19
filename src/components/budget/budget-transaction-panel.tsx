@@ -12,6 +12,7 @@ import { useCurrency } from "@/hooks/useCurrency";
 import type { Transaction, Category, Wallet } from "@shared/schema";
 import TransactionEditDialog from "@/components/track/transaction-edit-dialog";
 import TransactionForm from "@/components/track/transaction-form";
+import { displayMerchantName } from "@/lib/merchantName";
 
 // Category emojis mapping
 const categoryEmojis = {
@@ -600,8 +601,8 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
                               <span className="text-lg md:text-base">{emoji}</span>
                             </div>
                             <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-gray-900 truncate">
-                                {transaction.description || (isTransfer ? `${fromWalletName} → ${toWalletName}` : categoryName)}
+                              <p className="text-sm font-medium text-gray-900 truncate" title={transaction.description || undefined}>
+                                {displayMerchantName(transaction.description) || (isTransfer ? `${fromWalletName} → ${toWalletName}` : categoryName)}
                               </p>
                               <div className="flex items-center gap-2">
                                 <p className="text-xs text-gray-600">
@@ -715,8 +716,8 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
                               <span className="text-lg md:text-base">{emoji}</span>
                             </div>
                             <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-gray-900 truncate">
-                                {transaction.description || (isTransfer ? `${fromWalletName} → ${toWalletName}` : categoryName)}
+                              <p className="text-sm font-medium text-gray-900 truncate" title={transaction.description || undefined}>
+                                {displayMerchantName(transaction.description) || (isTransfer ? `${fromWalletName} → ${toWalletName}` : categoryName)}
                               </p>
                               <div className="flex items-center gap-2">
                                 <p className="text-xs text-gray-600">
