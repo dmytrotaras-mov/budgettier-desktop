@@ -44,6 +44,8 @@ pub fn run() {
             commands::budgets::update_budget_allocation,
             commands::budgets::delete_budget_allocation,
             commands::budgets::get_current_month_allocations,
+            commands::budgets::get_month_budget,
+            commands::budgets::create_month_budget,
             commands::backup::backup_db,
             commands::backup::restore_db,
             commands::backup::export_csv,

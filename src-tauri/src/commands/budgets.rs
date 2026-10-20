@@ -415,134 +415,145 @@ pub fn delete_budget_allocation(pool: State<DbPool>, id: String) -> Result<(), S
 // ---- Current month auto-create ----
 
 #[derive(Debug, Serialize)]
-pub struct CurrentMonth {
+pub struct MonthBudget {
     #[serde(rename = "budgetPlanId")]
     pub budget_plan_id: String,
     pub allocations: Vec<BudgetAllocation>,
+    pub month: String,
+    /// False for a past month that never had a budget (nothing is created
+    /// for it automatically — history isn't invented).
+    pub exists: bool,
+    /// Most recent earlier month that has a budget: what a new month copies.
+    #[serde(rename = "copySource")]
+    pub copy_source: Option<String>,
+}
+
+fn find_plan(conn: &Connection, month: &str) -> Option<BudgetPlan> {
+    conn.query_row(
+        &format!("SELECT {PLAN_COLS} FROM budget_plans WHERE period = 'monthly' AND month = ?1 LIMIT 1"),
+        params![month],
+        row_to_plan,
+    )
+    .ok()
+}
+
+fn latest_plan_before(conn: &Connection, month: &str) -> Option<BudgetPlan> {
+    conn.query_row(
+        &format!(
+            "SELECT {PLAN_COLS} FROM budget_plans
+             WHERE period = 'monthly' AND month < ?1 ORDER BY month DESC LIMIT 1"
+        ),
+        params![month],
+        row_to_plan,
+    )
+    .ok()
+}
+
+fn allocations_for(conn: &Connection, plan_id: &str) -> Result<Vec<BudgetAllocation>, String> {
+    let mut stmt = conn
+        .prepare(&format!("SELECT {ALLOC_COLS} FROM budget_category_allocations WHERE budget_plan_id = ?1"))
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![plan_id], row_to_alloc)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string());
+    rows
+}
+
+/// Create `month`'s plan as a copy of `source` (limits included), atomically.
+fn create_plan_copy(conn: &Connection, month: &str, source: Option<&BudgetPlan>) -> Result<BudgetPlan, String> {
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let zero = || "0".to_string();
+    let plan = insert_plan(
+        &tx,
+        PlanInput {
+            name: format!("Budget for {month}"),
+            total_budget: source.map(|p| p.total_budget.clone()).unwrap_or_else(zero),
+            savings_amount: source.map(|p| p.savings_amount.clone()).unwrap_or_else(zero),
+            savings_percentage: source.map(|p| p.savings_percentage.clone()).unwrap_or_else(zero),
+            expense_budget: source.map(|p| p.expense_budget.clone()).unwrap_or_else(zero),
+            period: Some("monthly".to_string()),
+            month: Some(month.to_string()),
+            year: None,
+            is_active: Some(true),
+        },
+    )?;
+    if let Some(src) = source {
+        for a in allocations_for(&tx, &src.id)? {
+            tx.execute(
+                "INSERT INTO budget_category_allocations (id, budget_plan_id, category_id, allocated_amount)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![Uuid::new_v4().to_string(), plan.id, a.category_id, a.allocated_amount],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(plan)
+}
+
+fn valid_month(month: &str) -> bool {
+    let b = month.as_bytes();
+    b.len() == 7 && b[4] == b'-' && month[..4].parse::<u32>().is_ok()
+        && month[5..].parse::<u32>().map_or(false, |m| (1..=12).contains(&m))
+}
+
+/// Budget for `month` ("YYYY-MM"). When it has none and `create` is set, it
+/// is created as a copy of the most recent earlier month's budget.
+pub(crate) fn month_budget(conn: &Connection, month: &str, create: bool) -> Result<MonthBudget, String> {
+    if !valid_month(month) {
+        return Err(format!("invalid month: {month}"));
+    }
+    let source = latest_plan_before(conn, month);
+    let plan = match find_plan(conn, month) {
+        Some(p) => Some(p),
+        None if create => Some(create_plan_copy(conn, month, source.as_ref())?),
+        None => None,
+    };
+    Ok(match plan {
+        Some(p) => MonthBudget {
+            allocations: allocations_for(conn, &p.id)?,
+            budget_plan_id: p.id,
+            month: month.to_string(),
+            exists: true,
+            copy_source: source.and_then(|s| s.month),
+        },
+        None => MonthBudget {
+            budget_plan_id: String::new(),
+            allocations: Vec::new(),
+            month: month.to_string(),
+            exists: false,
+            copy_source: source.and_then(|s| s.month),
+        },
+    })
+}
+
+fn current_month_str() -> String {
+    let (y, m) = current_year_month();
+    format!("{:04}-{:02}", y, m)
 }
 
 #[tauri::command]
-pub fn get_current_month_allocations(pool: State<DbPool>) -> Result<CurrentMonth, String> {
+pub fn get_current_month_allocations(pool: State<DbPool>) -> Result<MonthBudget, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
-    let (now_y, now_m) = current_year_month();
-    let month_str = format!("{:04}-{:02}", now_y, now_m);
+    month_budget(&conn, &current_month_str(), true)
+}
 
-    let existing: Option<BudgetPlan> = conn
-        .query_row(
-            &format!(
-                "SELECT {PLAN_COLS} FROM budget_plans
-                 WHERE period = 'monthly' AND month = ?1 LIMIT 1"
-            ),
-            params![month_str],
-            row_to_plan,
-        )
-        .ok();
+/// The budget for any month. The current and future months are created on
+/// first view (copied from the latest earlier budget); past months are not.
+#[tauri::command]
+pub fn get_month_budget(pool: State<DbPool>, month: String) -> Result<MonthBudget, String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+    let create = month.as_str() >= current_month_str().as_str();
+    month_budget(&conn, &month, create)
+}
 
-    let plan = match existing {
-        Some(p) => p,
-        None => {
-            // Try to copy previous month
-            let (prev_y, prev_m) = if now_m == 1 {
-                (now_y - 1, 12)
-            } else {
-                (now_y, now_m - 1)
-            };
-            let prev_month_str = format!("{:04}-{:02}", prev_y, prev_m);
-            let prev: Option<BudgetPlan> = conn
-                .query_row(
-                    &format!(
-                        "SELECT {PLAN_COLS} FROM budget_plans
-                         WHERE period = 'monthly' AND month = ?1 LIMIT 1"
-                    ),
-                    params![prev_month_str],
-                    row_to_plan,
-                )
-                .ok();
-
-            let new_plan = match prev {
-                Some(p) => insert_plan(
-                    &conn,
-                    PlanInput {
-                        name: format!("Budget for {}", month_str),
-                        total_budget: p.total_budget.clone(),
-                        savings_amount: p.savings_amount.clone(),
-                        savings_percentage: p.savings_percentage.clone(),
-                        expense_budget: p.expense_budget.clone(),
-                        period: Some("monthly".to_string()),
-                        month: Some(month_str.clone()),
-                        year: None,
-                        is_active: Some(true),
-                    },
-                )?,
-                None => insert_plan(
-                    &conn,
-                    PlanInput {
-                        name: format!("Budget for {}", month_str),
-                        total_budget: "0".into(),
-                        savings_amount: "0".into(),
-                        savings_percentage: "0".into(),
-                        expense_budget: "0".into(),
-                        period: Some("monthly".to_string()),
-                        month: Some(month_str.clone()),
-                        year: None,
-                        is_active: Some(true),
-                    },
-                )?,
-            };
-
-            // Copy previous month's allocations into the new plan.
-            // Collect first (drop the prepared statement / iterator before re-using conn).
-            let prev_id_opt: Option<String> = conn
-                .query_row(
-                    "SELECT id FROM budget_plans WHERE period = 'monthly' AND month = ?1 LIMIT 1",
-                    params![prev_month_str],
-                    |r| r.get::<_, String>(0),
-                )
-                .ok();
-            if let Some(prev_id) = prev_id_opt {
-                let prev_allocs: Vec<BudgetAllocation> = {
-                    let mut stmt = conn
-                        .prepare(&format!(
-                            "SELECT {ALLOC_COLS} FROM budget_category_allocations
-                             WHERE budget_plan_id = ?1"
-                        ))
-                        .map_err(|e| e.to_string())?;
-                    let mapped = stmt
-                        .query_map(params![prev_id], row_to_alloc)
-                        .map_err(|e| e.to_string())?;
-                    let collected: Result<Vec<_>, _> = mapped.collect();
-                    collected.map_err(|e| e.to_string())?
-                };
-                for a in prev_allocs {
-                    let new_id = Uuid::new_v4().to_string();
-                    conn.execute(
-                        "INSERT INTO budget_category_allocations
-                         (id, budget_plan_id, category_id, allocated_amount)
-                         VALUES (?1, ?2, ?3, ?4)",
-                        params![new_id, new_plan.id, a.category_id, a.allocated_amount],
-                    )
-                    .map_err(|e| e.to_string())?;
-                }
-            }
-            new_plan
-        }
-    };
-
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT {ALLOC_COLS} FROM budget_category_allocations WHERE budget_plan_id = ?1"
-        ))
-        .map_err(|e| e.to_string())?;
-    let allocations: Vec<BudgetAllocation> = stmt
-        .query_map(params![plan.id], row_to_alloc)
-        .map_err(|e| e.to_string())?
-        .collect::<Result<_, _>>()
-        .map_err(|e| e.to_string())?;
-
-    Ok(CurrentMonth {
-        budget_plan_id: plan.id,
-        allocations,
-    })
+/// Explicitly create a (past) month's budget by copying the latest earlier one.
+#[tauri::command]
+pub fn create_month_budget(pool: State<DbPool>, month: String) -> Result<MonthBudget, String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+    month_budget(&conn, &month, true)
 }
 
 // ---- helpers ----
@@ -568,4 +579,54 @@ fn current_year_month() -> (i32, u32) {
     let m = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32;
     let y = if m <= 2 { y + 1 } else { y };
     (y as i32, m)
+}
+
+#[cfg(test)]
+mod month_budget_tests {
+    use super::*;
+
+    fn db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&conn).unwrap();
+        conn.execute("INSERT INTO categories (id, name, type) VALUES ('groc', 'Groceries', 'expense')", []).unwrap();
+        conn
+    }
+
+    fn limit(conn: &Connection, month: &str) -> Option<String> {
+        let b = month_budget(conn, month, false).unwrap();
+        b.allocations.first().map(|a| a.allocated_amount.clone())
+    }
+
+    #[test]
+    fn months_are_independent_and_new_months_copy_the_latest() {
+        let conn = db();
+        // September budget with Groceries 400.
+        let sep = month_budget(&conn, "2026-09", true).unwrap();
+        conn.execute(
+            "INSERT INTO budget_category_allocations (id, budget_plan_id, category_id, allocated_amount)
+             VALUES ('a1', ?1, 'groc', '400')",
+            params![sep.budget_plan_id],
+        )
+        .unwrap();
+
+        // October is created as a copy, then changed to 450.
+        let oct = month_budget(&conn, "2026-10", true).unwrap();
+        assert_eq!(oct.copy_source.as_deref(), Some("2026-09"));
+        assert_eq!(limit(&conn, "2026-10").as_deref(), Some("400"));
+        conn.execute(
+            "UPDATE budget_category_allocations SET allocated_amount = '450' WHERE budget_plan_id = ?1",
+            params![oct.budget_plan_id],
+        )
+        .unwrap();
+
+        // September keeps its own limit; December copies the latest (October), skipping the gap.
+        assert_eq!(limit(&conn, "2026-09").as_deref(), Some("400"));
+        month_budget(&conn, "2026-12", true).unwrap();
+        assert_eq!(limit(&conn, "2026-12").as_deref(), Some("450"));
+
+        // A month that was never opened isn't created by a read-only look.
+        let aug = month_budget(&conn, "2026-08", false).unwrap();
+        assert!(!aug.exists && aug.allocations.is_empty());
+        assert!(month_budget(&conn, "2026-13", false).is_err());
+    }
 }

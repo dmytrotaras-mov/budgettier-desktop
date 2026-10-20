@@ -5,8 +5,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Progress } from "@/components/ui/progress";
-import { Target, X, Plus, BarChart3, PieChart } from "lucide-react";
+import { Target, Plus } from "lucide-react";
+import { format, getDaysInMonth, isSameMonth } from "date-fns";
+import { invoke } from "@tauri-apps/api/core";
+import { PillTabs } from "@/components/overview/category-breakdown";
+import { BudgetStatusList, type BudgetItem, type BudgetView, type UnbudgetedItem } from "./budget-status-list";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { useCurrency } from "@/hooks/useCurrency";
@@ -30,6 +33,14 @@ const categoryEmojis = {
   "Rental Income": "🏠", "Other Income": "💵",
 };
 
+interface MonthBudget {
+  budgetPlanId: string;
+  allocations: BudgetCategoryAllocation[];
+  month: string;
+  exists: boolean;
+  copySource: string | null;
+}
+
 interface BudgetPlanPanelProps {
   dateRange: {
     start: Date;
@@ -39,7 +50,21 @@ interface BudgetPlanPanelProps {
 }
 
 export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanPanelProps) {
-  const [budgetViewMode, setBudgetViewMode] = useState<'bar' | 'circle'>('bar');
+  const [budgetView, setBudgetViewState] = useState<BudgetView>(() => {
+    try {
+      return localStorage.getItem("budgetView") === "groups" ? "groups" : "status";
+    } catch {
+      return "status";
+    }
+  });
+  const setBudgetView = (view: BudgetView) => {
+    setBudgetViewState(view);
+    try {
+      localStorage.setItem("budgetView", view);
+    } catch {
+      // Remembering the view is a convenience; ignore storage errors.
+    }
+  };
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>("");
   const [budgetAmount, setBudgetAmount] = useState<string>("");
@@ -57,8 +82,22 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
   });
   const { data: allSections = [] } = useSections();
 
-  const { data: budgetData, isLoading: isBudgetLoading } = useQuery<{ budgetPlanId: string; allocations: BudgetCategoryAllocation[] }>({
-    queryKey: ["/api/budget-allocations/current-month"],
+  // The budget of the month being viewed. Current/future months are created
+  // on first view as a copy of the latest earlier budget; past months aren't.
+  const monthKey = format(selectedDate, "yyyy-MM");
+  const { data: budgetData, isLoading: isBudgetLoading } = useQuery<MonthBudget>({
+    queryKey: ["budget-month", monthKey],
+    queryFn: () => invoke<MonthBudget>("get_month_budget", { month: monthKey }),
+  });
+  const refreshBudget = () => {
+    queryClient.invalidateQueries({ queryKey: ["budget-month"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/budget-allocations/current-month"] });
+  };
+  const createMonthBudget = useMutation({
+    mutationFn: () => invoke<MonthBudget>("create_month_budget", { month: monthKey }),
+    onSuccess: refreshBudget,
+    onError: (error: any) =>
+      toast({ title: "Couldn't create budget", description: String(error?.message || error), variant: "destructive" }),
   });
 
   const budgetAllocations = budgetData?.allocations || [];
@@ -76,15 +115,16 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
       .reduce((sum: number, t: any) => sum + parseFloat(t.amount), 0);
   };
 
+  // Built-in sections first (in Settings order), then custom sections,
+  // then ungrouped "Custom Categories" last.
+  const sectionOrder = visibleSections(allSections, "expense").map((s) => s.name);
+  const sectionRank = (section: string) => {
+    if (section === UNGROUPED_SECTION_NAME) return 1000;
+    const idx = sectionOrder.indexOf(section);
+    return idx === -1 ? 500 : idx;
+  };
+
   const getSortedBudgetAllocations = () => {
-    // Built-in sections first (in Settings order), then custom sections,
-    // then ungrouped "Custom Categories" last.
-    const sectionOrder = visibleSections(allSections, "expense").map((s) => s.name);
-    const sectionRank = (section: string) => {
-      if (section === UNGROUPED_SECTION_NAME) return 1000;
-      const idx = sectionOrder.indexOf(section);
-      return idx === -1 ? 500 : idx;
-    };
 
     const allocationsWithData = budgetAllocations
       .map((allocation) => {
@@ -120,6 +160,35 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
     });
   };
 
+  const statusItems: BudgetItem[] = getSortedBudgetAllocations().map(({ allocation, category, spent, budget, section }) => ({
+    id: allocation.id,
+    name: category.name.trim(),
+    emoji: getCategoryEmoji(category),
+    section,
+    spent,
+    budget,
+  }));
+
+  // Spending this month in categories that have no limit.
+  const budgetedIds = new Set(budgetAllocations.map((a) => a.categoryId));
+  const unbudgeted: UnbudgetedItem[] = Object.values(
+    transactions.reduce<Record<string, UnbudgetedItem>>((acc, t: any) => {
+      if (t.type !== "expense" || t.excludeFromBudget || t.isOpening || !t.categoryId || budgetedIds.has(t.categoryId)) return acc;
+      const category = categories.find((c) => c.id === t.categoryId);
+      if (!category || isHiddenCategory(category, allSections)) return acc;
+      (acc[t.categoryId] ??= { categoryId: t.categoryId, name: category.name.trim(), spent: 0 }).spent += parseFloat(t.amount);
+      return acc;
+    }, {}),
+  ).sort((a, b) => b.spent - a.spent);
+
+  // How far into the selected month we are: drives the "today" marker.
+  const today = new Date();
+  const daysInMonth = getDaysInMonth(selectedDate);
+  const isThisMonth = isSameMonth(selectedDate, today);
+  const isPastMonth = !isThisMonth && selectedDate < today;
+  const pace = isThisMonth ? today.getDate() / daysInMonth : isPastMonth ? 1 : null;
+  const daysLeft = isThisMonth ? daysInMonth - today.getDate() + 1 : isPastMonth ? 0 : null;
+
   // Calculate total budget and total spent
   const totalBudget = budgetAllocations.reduce((sum, allocation) =>
     sum + parseFloat(allocation.allocatedAmount || "0"), 0
@@ -135,7 +204,7 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
       apiRequest("POST", "/api/budget-allocations", allocation),
     onSuccess: () => {
       toast({ title: "Success", description: "Budget category added successfully" });
-      queryClient.invalidateQueries({ queryKey: ["/api/budget-allocations/current-month"] });
+      refreshBudget();
       setIsEditModalOpen(false);
       setSelectedCategoryId("");
       setBudgetAmount("");
@@ -151,7 +220,7 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
       apiRequest("PUT", `/api/budget-allocations/${id}`, { allocatedAmount: amount }),
     onSuccess: () => {
       toast({ title: "Success", description: "Budget updated successfully" });
-      queryClient.invalidateQueries({ queryKey: ["/api/budget-allocations/current-month"] });
+      refreshBudget();
       setIsEditModalOpen(false);
       setSelectedCategoryId("");
       setBudgetAmount("");
@@ -166,7 +235,7 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
     mutationFn: (id: string) => apiRequest("DELETE", "/api/budget-allocations/" + id),
     onSuccess: () => {
       toast({ title: "Success", description: "Budget category removed successfully" });
-      queryClient.invalidateQueries({ queryKey: ["/api/budget-allocations/current-month"] });
+      refreshBudget();
     },
     onError: () => {
       toast({ title: "Error", description: "Failed to remove budget category", variant: "destructive" });
@@ -218,7 +287,7 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
     <>
       <div
         className="bg-white overflow-hidden"
-        style={{ flex: 1, aspectRatio: '525 / 632', display: 'flex', flexDirection: 'column', borderRadius: '20px' }}
+        style={{ flex: 1, aspectRatio: '525 / 632', minWidth: 0, display: 'flex', flexDirection: 'column', borderRadius: '20px' }}
       >
         {/* Header */}
         <div style={{ padding: '15px 20px', borderBottom: '1px solid #F3F4F6' }}>
@@ -229,235 +298,83 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
           </div>
 
           <div className="flex items-center justify-between gap-2">
-            {/* Left side - Budget summary and view toggle */}
-            <div className="flex items-center gap-2">
-              {/* Budget Summary Card */}
-              <div
-                style={{
-                  height: '48px',
-                  backgroundColor: '#fff',
-                  border: '1px solid #F3F4F6',
-                  borderRadius: '30px',
-                  fontFamily: 'Inter',
-                  fontSize: '14px',
-                  fontWeight: 500,
-                  color: '#000',
-                  padding: '0 16px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {currencySymbol}{totalSpent.toFixed(0)} / {currencySymbol}{totalBudget.toFixed(0)}
-              </div>
-
-              {/* View Mode Toggle Button */}
-              <button
-              type="button"
-              onClick={() => setBudgetViewMode(budgetViewMode === 'bar' ? 'circle' : 'bar')}
-              className="group"
-              style={{
-                height: '48px',
-                minHeight: '48px',
-                minWidth: '48px',
-                width: '48px',
-                backgroundColor: '#fff',
-                border: '1px solid #F3F4F6',
-                borderRadius: '30px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                transition: 'background-color 0.2s',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = '#000';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = '#fff';
-              }}
-            >
-              {budgetViewMode === 'bar' ? (
-                <BarChart3 size={20} className="text-black group-hover:text-white transition-colors" />
-              ) : (
-                <PieChart size={20} className="text-black group-hover:text-white transition-colors" />
-              )}
-            </button>
-            </div>
-
-            {/* Add Button - Right side */}
+            <PillTabs
+              tabs={[["status", "Status"], ["groups", "Groups"]]}
+              value={budgetView}
+              onChange={setBudgetView}
+            />
             <Button
-                onClick={handleOpenEditModal}
-                style={{
-                  height: '48px',
-                  minHeight: '48px',
-                  minWidth: '48px',
-                  width: '48px',
-                  borderRadius: '30px'
-                }}
-                className="bg-[#F3F4F6] text-black hover:bg-black hover:text-white p-0"
-              >
-                <Plus className="w-5 h-5" />
-              </Button>
+              onClick={handleOpenEditModal}
+              title="Add a category to the budget"
+              style={{ height: '48px', minHeight: '48px', minWidth: '48px', width: '48px', borderRadius: '30px' }}
+              className="bg-[#F3F4F6] text-black hover:bg-black hover:text-white p-0"
+            >
+              <Plus className="w-5 h-5" />
+            </Button>
           </div>
         </div>
 
         {/* Content */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '15px 20px' }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '4px 20px 15px' }}>
           {isBudgetLoading ? (
             <div className="flex items-center justify-center h-full">
               <div className="w-16 h-16 bg-purple-50 rounded-full flex items-center justify-center">
                 <Target className="w-8 h-8 text-purple-600 animate-pulse" />
               </div>
             </div>
-          ) : budgetAllocations.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full">
+          ) : budgetData && !budgetData.exists ? (
+            <div className="flex flex-col items-center justify-center h-full text-center px-6">
               <div className="w-16 h-16 bg-purple-50 rounded-full flex items-center justify-center mb-4">
                 <Target className="w-8 h-8 text-purple-600" />
               </div>
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No Budget Categories</h3>
-              <p className="text-gray-600">Click Edit to add categories</p>
+              <h3 className="text-lg font-medium text-gray-900 mb-1">No budget for {format(selectedDate, "MMMM yyyy")}</h3>
+              <p className="text-sm text-gray-500 mb-4">
+                {budgetData.copySource
+                  ? `Start from the limits you had in ${format(new Date(`${budgetData.copySource}-01T00:00:00`), "MMMM yyyy")}.`
+                  : "Create a budget for this month to compare spending with limits."}
+              </p>
+              <Button
+                onClick={() => createMonthBudget.mutate()}
+                disabled={createMonthBudget.isPending}
+                className="rounded-full bg-black text-white hover:bg-gray-800"
+              >
+                {budgetData.copySource
+                  ? `Copy from ${format(new Date(`${budgetData.copySource}-01T00:00:00`), "MMMM")}`
+                  : "Create budget"}
+              </Button>
             </div>
-          ) : budgetViewMode === 'bar' ? (
-            <div className="space-y-3">
-              {(() => {
-                const sortedData = getSortedBudgetAllocations();
-                let lastSection = '';
-
-                return sortedData.map((item) => {
-                  const { allocation, category, spent, budget, remaining, section } = item;
-                  const percentage = budget > 0 ? (spent / budget) * 100 : 0;
-                  const emoji = getCategoryEmoji(category);
-                  const categoryColor = category.color || "#6B7280";
-
-                  const showSectionHeader = section !== lastSection;
-                  if (showSectionHeader) {
-                    lastSection = section;
-                  }
-
-                  return (
-                    <div key={allocation.id}>
-                      {showSectionHeader && (
-                        <div className="sticky top-0 bg-white z-10 pt-2 pb-2">
-                          <h3 style={{ fontFamily: 'Inter', fontSize: '10px', fontWeight: 600, color: '#6B7280' }}>
-                            {section}
-                          </h3>
-                        </div>
-                      )}
-                      <div
-                        className="p-3 border border-gray-100 rounded-lg hover:bg-gray-50 group cursor-pointer"
-                        onClick={() => handleEditAllocation(allocation)}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex items-center gap-3 flex-1">
-                            <div
-                              className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
-                              style={{ backgroundColor: categoryColor + '20' }}
-                            >
-                              <span className="text-lg">{emoji}</span>
-                            </div>
-                            <div className="flex-1">
-                              <h4 className="font-medium text-gray-900 mb-1 text-sm">{category.name}</h4>
-                              <p className="text-xs text-gray-600 mb-2">
-                                {formatCurrency(spent.toString())} / {formatCurrency(allocation.allocatedAmount)}
-                              </p>
-                              <Progress value={Math.min(percentage, 100)} className="h-1.5" />
-                            </div>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 p-0 hover:bg-red-100 hover:text-red-600"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteBudgetAllocation(allocation.id);
-                            }}
-                            disabled={deleteBudgetAllocationMutation.isPending}
-                          >
-                            <X className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                });
-              })()}
+          ) : budgetAllocations.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-center px-6">
+              <div className="w-16 h-16 bg-purple-50 rounded-full flex items-center justify-center mb-4">
+                <Target className="w-8 h-8 text-purple-600" />
+              </div>
+              <h3 className="text-lg font-medium text-gray-900 mb-1">Set a monthly budget</h3>
+              <p className="text-sm text-gray-500 mb-4">Pick the categories you want to keep an eye on and give each a limit.</p>
+              <Button onClick={handleOpenEditModal} className="rounded-full bg-black text-white hover:bg-gray-800">
+                <Plus className="w-4 h-4 mr-1" /> Add category
+              </Button>
             </div>
           ) : (
-            <div className="grid grid-cols-4 gap-3">
-              {(() => {
-                const sortedData = getSortedBudgetAllocations();
-                let lastSection = '';
-                const result: JSX.Element[] = [];
-
-                sortedData.forEach((item) => {
-                  const { allocation, category, spent, budget, remaining, section } = item;
-                  const percentage = budget > 0 ? (spent / budget) * 100 : 0;
-                  const emoji = getCategoryEmoji(category);
-                  const categoryColor = category.color || "#6B7280";
-
-                  const showSectionHeader = section !== lastSection;
-                  if (showSectionHeader) {
-                    lastSection = section;
-                    result.push(
-                      <div key={`section-${section}`} className="col-span-4 sticky top-0 bg-white z-10 pt-2 pb-2">
-                        <h3 style={{ fontFamily: 'Inter', fontSize: '10px', fontWeight: 600, color: '#6B7280' }}>
-                          {section}
-                        </h3>
-                      </div>
-                    );
-                  }
-
-                  const radius = 90;
-                  const circumference = 2 * Math.PI * 36;
-                  const strokeDashoffset = circumference - (percentage / 100) * circumference;
-
-                  result.push(
-                    <div
-                      key={allocation.id}
-                      className="relative flex flex-col items-center p-2 border border-gray-100 rounded-lg hover:bg-gray-50 group cursor-pointer"
-                      onClick={() => handleEditAllocation(allocation)}
-                    >
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="absolute top-0.5 right-0.5 opacity-0 group-hover:opacity-100 transition-opacity h-5 w-5 p-0 hover:bg-red-100 hover:text-red-600"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteBudgetAllocation(allocation.id);
-                        }}
-                        disabled={deleteBudgetAllocationMutation.isPending}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-
-                      <svg width="90" height="90" className="transform -rotate-90">
-                        <circle cx="45" cy="45" r="36" fill="none" stroke="#f3f4f6" strokeWidth="6" />
-                        <circle
-                          cx="45" cy="45" r="36" fill="none" stroke={categoryColor}
-                          strokeWidth="6" strokeDasharray={circumference}
-                          strokeDashoffset={strokeDashoffset} strokeLinecap="round"
-                        />
-                      </svg>
-
-                      <div className="absolute top-[10px] left-0 right-0 flex flex-col items-center justify-center h-[90px]">
-                        <span className="text-xl mb-0.5">{emoji}</span>
-                        <span className="text-[9px] font-medium text-gray-900">
-                          {formatCurrency(remaining.toString())}
-                        </span>
-                      </div>
-
-                      <p className="text-[10px] font-medium text-center text-gray-900 mt-1 line-clamp-2">
-                        {category.name}
-                      </p>
-                    </div>
-                  );
-                });
-
-                return result;
-              })()}
-            </div>
+            <BudgetStatusList
+              items={statusItems}
+              unbudgeted={unbudgeted}
+              view={budgetView}
+              sectionOrder={sectionRank}
+              monthName={format(selectedDate, "MMMM")}
+              pace={pace}
+              daysLeft={daysLeft}
+              formatCurrency={(n) => formatCurrency(n)}
+              onEdit={(id) => {
+                const allocation = budgetAllocations.find((a) => a.id === id);
+                if (allocation) handleEditAllocation(allocation);
+              }}
+              onAddUnbudgeted={(u) => {
+                setEditingAllocationId(null);
+                setSelectedCategoryId(u.categoryId);
+                setBudgetAmount(String(Math.ceil(u.spent / 10) * 10));
+                setIsEditModalOpen(true);
+              }}
+            />
           )}
         </div>
       </div>

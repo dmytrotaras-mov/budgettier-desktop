@@ -5,7 +5,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { format, isToday, isYesterday, isSameDay, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, getDay } from "date-fns";
-import { Wallet as WalletIcon, TrendingUp, TrendingDown, ArrowRight, Plus, ListFilter, List, Calendar } from "lucide-react";
+import { Wallet as WalletIcon, TrendingUp, TrendingDown, ArrowRight, Plus, ListFilter, List, Calendar, FileUp } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { useCurrency } from "@/hooks/useCurrency";
@@ -13,6 +13,10 @@ import type { Transaction, Category, Wallet } from "@shared/schema";
 import TransactionEditDialog from "@/components/track/transaction-edit-dialog";
 import TransactionForm from "@/components/track/transaction-form";
 import { displayMerchantName } from "@/lib/merchantName";
+import ImportWiseDialog from "@/components/settings/import-wise-dialog";
+import { PillTabs } from "@/components/overview/category-breakdown";
+import { TransactionFilters, type TypeFilter } from "./transaction-filters";
+import { SpendingCalendar } from "./spending-calendar";
 
 // Category emojis mapping
 const categoryEmojis = {
@@ -90,9 +94,11 @@ interface BudgetTransactionPanelProps {
 }
 
 export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddTransaction }: BudgetTransactionPanelProps) {
+  const [importOpen, setImportOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
-  const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
+  const [search, setSearch] = useState("");
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<Date | null>(null);
@@ -156,6 +162,7 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
     },
   });
 
+  const query = search.trim().toLowerCase();
   const filteredTransactions = transactions.filter(transaction => {
     // Opening-balance transactions are managed in Settings → Wallets and never
     // shown in the transaction list.
@@ -169,8 +176,28 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
       }
     }
     if (typeFilter !== "all" && transaction.type !== typeFilter) return false;
+    if (query) {
+      const category = categories.find((c) => c.id === transaction.categoryId);
+      const haystack = [
+        transaction.description,
+        displayMerchantName(transaction.description),
+        category?.name,
+        transaction.amount,
+      ].join(" ").toLowerCase();
+      if (!haystack.includes(query)) return false;
+    }
     return true;
   });
+  const filtersActive = categoryFilter !== "all" || typeFilter !== "all" || query !== "";
+  const filteredNet = filteredTransactions.reduce(
+    (sum, t) => sum + (t.type === "income" ? 1 : t.type === "expense" ? -1 : 0) * parseFloat(t.amount),
+    0,
+  );
+  const clearFilters = () => {
+    setCategoryFilter("all");
+    setTypeFilter("all");
+    setSearch("");
+  };
 
   // Sort transactions by date (latest first) and group by date
   const sortedTransactions = [...filteredTransactions].sort((a, b) =>
@@ -263,130 +290,23 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
           </div>
 
           <div className="flex items-center justify-between">
-            {/* View Mode Toggle + Filter Button */}
-            <div className="flex gap-2">
-              {/* View Mode Toggle */}
-              <button
-                type="button"
-                onClick={() => {
-                  setViewMode(viewMode === 'list' ? 'calendar' : 'list');
-                }}
-                className="group"
-                style={{
-                  height: '48px',
-                  minHeight: '48px',
-                  minWidth: '48px',
-                  width: '48px',
-                  backgroundColor: '#fff',
-                  border: '1px solid #F3F4F6',
-                  borderRadius: '30px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  transition: 'background-color 0.2s',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#000'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#fff'; }}
-              >
-                {viewMode === 'list' ? (
-                  <List size={20} className="text-black group-hover:text-white transition-colors" />
-                ) : (
-                  <Calendar size={20} className="text-black group-hover:text-white transition-colors" />
-                )}
-              </button>
+            <PillTabs
+              tabs={[["list", "List"], ["calendar", "Calendar"]]}
+              value={viewMode}
+              onChange={setViewMode}
+            />
 
-              {/* Filter Button - Only show in list view */}
-              {viewMode === 'list' && (
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <button
-                      onMouseEnter={(e) => {
-                        if (categoryFilter === "all" && typeFilter === "all") {
-                          e.currentTarget.style.backgroundColor = '#000';
-                          const icon = e.currentTarget.querySelector('svg');
-                          if (icon) icon.style.color = '#fff';
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        if (categoryFilter === "all" && typeFilter === "all") {
-                          e.currentTarget.style.backgroundColor = '#fff';
-                          const icon = e.currentTarget.querySelector('svg');
-                          if (icon) icon.style.color = '#000';
-                        }
-                      }}
-                      style={{
-                        width: '48px',
-                        height: '48px',
-                        minHeight: '48px',
-                        minWidth: '48px',
-                        backgroundColor: categoryFilter !== "all" || typeFilter !== "all" ? '#F3F4F6' : '#fff',
-                        border: '1px solid #F3F4F6',
-                        borderRadius: '30px',
-                        padding: '0',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        transition: 'background-color 0.2s'
-                      }}
-                    >
-                      <ListFilter style={{ width: '20px', height: '20px', color: '#000', transition: 'color 0.2s' }} />
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-80 p-4" align="start">
-                    <div className="space-y-4">
-                      <div>
-                        <label className="text-sm font-medium mb-2 block">Category</label>
-                        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                          <SelectTrigger className="w-full h-9 text-sm">
-                            <SelectValue placeholder="All Categories" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">All Categories</SelectItem>
-                            {categories.map((category) => (
-                              <SelectItem key={category.id} value={category.id}>
-                                {category.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div>
-                        <label className="text-sm font-medium mb-2 block">Type</label>
-                        <Select value={typeFilter} onValueChange={setTypeFilter}>
-                          <SelectTrigger className="w-full h-9 text-sm">
-                            <SelectValue placeholder="All Types" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">All Types</SelectItem>
-                            <SelectItem value="expense">Expenses</SelectItem>
-                            <SelectItem value="income">Income</SelectItem>
-                            <SelectItem value="transfer">Transfers</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      {(categoryFilter !== "all" || typeFilter !== "all") && (
-                        <div className="pt-2 border-t border-gray-200">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="w-full h-8 text-sm text-gray-600 hover:text-gray-800"
-                            onClick={() => {
-                              setCategoryFilter("all");
-                              setTypeFilter("all");
-                            }}
-                          >
-                            Reset Filters
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              )}
-            </div>
+            <div className="flex items-center gap-2">
+            {/* Import Wise statement — same dialog as Settings → Data */}
+            <Button
+              onClick={() => setImportOpen(true)}
+              title="Import Wise statement"
+              aria-label="Import Wise statement"
+              style={{ height: '48px', minHeight: '48px', width: '48px', minWidth: '48px', padding: 0, borderRadius: '30px' }}
+              className="bg-[#F3F4F6] text-black hover:bg-black hover:text-white"
+            >
+              <FileUp className="w-5 h-5" />
+            </Button>
 
             {/* Add Transaction Button */}
             <>
@@ -434,98 +354,38 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
                 <span className="add-transaction-text">Add Transaction</span>
               </Button>
             </>
+            </div>
+          </div>
+
+          <div className="mt-3">
+            <TransactionFilters
+              search={search}
+              onSearch={setSearch}
+              type={typeFilter}
+              onType={setTypeFilter}
+              categoryId={categoryFilter}
+              onCategory={setCategoryFilter}
+              categories={categories}
+            />
           </div>
         </div>
 
         {/* Content */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '15px 20px' }}>
+        {/* No top padding here: the sticky date headers carry it, so rows
+            scrolling up disappear under a header instead of peeking above it. */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px 15px' }}>
           {isLoading ? (
             <div className="flex items-center justify-center h-full">
               <div className="animate-pulse">Loading...</div>
             </div>
           ) : viewMode === 'calendar' ? (
-            // Calendar View
-            <div>
-              {/* Day Headers */}
-              <div className="grid grid-cols-7 gap-1 mb-2">
-                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
-                  <div key={day} className="text-center" style={{ fontFamily: 'Inter', fontSize: '10px', fontWeight: 600, color: '#6B7280', padding: '8px 0' }}>
-                    {day}
-                  </div>
-                ))}
-              </div>
-
-              {/* Calendar Grid */}
-              <div className="grid grid-cols-7 gap-1">
-                {(() => {
-                  const monthStart = startOfMonth(selectedDate);
-                  const monthEnd = endOfMonth(selectedDate);
-                  const startDay = getDay(monthStart);
-                  const days = eachDayOfInterval({ start: monthStart, end: monthEnd });
-
-                  // Add empty cells for days before month starts
-                  const cells: JSX.Element[] = [];
-                  for (let i = 0; i < startDay; i++) {
-                    cells.push(<div key={`empty-${i}`} />);
-                  }
-
-                  // Add day cells
-                  days.forEach((day) => {
-                    const { income, expense } = calculateDayTotals(day);
-                    const isCurrentDay = isToday(day);
-                    const hasTransactions = income > 0 || expense > 0;
-
-                    cells.push(
-                      <div
-                        key={day.toISOString()}
-                        onClick={() => handleDateClick(day)}
-                        className="cursor-pointer transition-all"
-                        style={{
-                          border: isCurrentDay ? '2px solid #000' : '1px solid #E5E7EB',
-                          borderRadius: '8px',
-                          padding: '6px 4px',
-                          minHeight: '70px',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          backgroundColor: '#fff',
-                          color: '#000'
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#F9FAFB'}
-                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#fff'}
-                      >
-                        <div
-                          style={{
-                            fontFamily: 'Inter',
-                            fontSize: '11px',
-                            fontWeight: isCurrentDay ? 700 : 500,
-                            marginBottom: '4px',
-                            textAlign: 'center'
-                          }}
-                        >
-                          {format(day, 'd')}
-                        </div>
-                        {hasTransactions && (
-                          <div style={{ fontSize: '9px', fontFamily: 'Inter', lineHeight: '1.2' }}>
-                            {income > 0 && (
-                              <div style={{ color: '#10B981', fontWeight: 500, textAlign: 'center' }}>
-                                +{formatCurrency(income.toString())}
-                              </div>
-                            )}
-                            {expense > 0 && (
-                              <div style={{ color: '#EF4444', fontWeight: 500, textAlign: 'center' }}>
-                                -{formatCurrency(expense.toString())}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  });
-
-                  return cells;
-                })()}
-              </div>
-            </div>
+            <SpendingCalendar
+              month={selectedDate}
+              transactions={filteredTransactions}
+              categories={categories}
+              formatCurrency={(n) => formatCurrency(n)}
+              onDayClick={handleDateClick}
+            />
           ) : Object.keys(groupedTransactions).length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full">
               <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
@@ -533,13 +393,27 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
               </div>
               <h3 className="text-lg font-medium text-gray-900 mb-2">No transactions found</h3>
               <p className="text-gray-600 text-center">
-                {categoryFilter !== "all" || typeFilter !== "all"
+                {filtersActive
                   ? "Try adjusting your filters to see more transactions."
                   : "Start by adding your first transaction."}
               </p>
             </div>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-1">
+              {filtersActive && (
+                <div className="flex items-center justify-between pt-3 text-xs text-gray-500">
+                  <span className="tabular-nums">
+                    {filteredTransactions.length} {filteredTransactions.length === 1 ? "transaction" : "transactions"}
+                    {" · "}
+                    <span className={filteredNet < 0 ? "text-red-700" : "text-emerald-700"}>
+                      {filteredNet < 0 ? "−" : "+"}{formatCurrency(Math.abs(filteredNet))}
+                    </span>
+                  </span>
+                  <button type="button" onClick={clearFilters} className="font-medium text-gray-900 hover:underline">
+                    Clear filters
+                  </button>
+                </div>
+              )}
               {Object.keys(groupedTransactions).map((dateKey) => (
                 <div key={dateKey}>
                   {/* Date Header */}
@@ -549,6 +423,7 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
                       top: 0,
                       backgroundColor: '#fff',
                       zIndex: 10,
+                      paddingTop: '15px',
                       paddingBottom: '8px',
                       borderBottom: '1px solid #E5E7EB',
                       marginBottom: '8px'
@@ -576,6 +451,15 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
                         );
                       })()}
                     </div>
+                    {/* Soft fade so rows slide out under the header instead of being cut off */}
+                    <div
+                      aria-hidden
+                      style={{
+                        position: 'absolute', left: 0, right: 0, top: '100%', height: 14,
+                        marginTop: 1, pointerEvents: 'none',
+                        background: 'linear-gradient(#fff, rgba(255,255,255,0))',
+                      }}
+                    />
                   </div>
 
                   {/* Transactions for this date */}
@@ -782,6 +666,8 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
           )}
         </DialogContent>
       </Dialog>
+
+      <ImportWiseDialog open={importOpen} onClose={() => setImportOpen(false)} />
     </>
   );
 }

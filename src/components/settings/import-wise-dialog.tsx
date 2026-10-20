@@ -11,7 +11,7 @@
 //   - category dropdown (for income/expense; disabled for transfers)
 //   - source-wallet dropdown (for transfers only)
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -68,6 +68,8 @@ interface Props {
   onClose: () => void;
 }
 
+const LAST_WALLET_KEY = "wiseImportWalletId";
+
 export default function ImportWiseDialog({ open, onClose }: Props) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -91,6 +93,22 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
   } | null>(null);
 
   const { data: wallets = [] } = useQuery<Wallet[]>({ queryKey: ["/api/wallets"] });
+
+  // Pre-select the wallet used last time (or one named "Wise") so a routine
+  // import is just: pick file → Preview.
+  useEffect(() => {
+    if (!open || targetWalletId || wallets.length === 0) return;
+    let last: string | null = null;
+    try {
+      last = localStorage.getItem(LAST_WALLET_KEY);
+    } catch {
+      // No remembered wallet — fall through to the name match.
+    }
+    const pick =
+      wallets.find((w: any) => w.id === last) ??
+      wallets.find((w: any) => /wise/i.test(w.name));
+    if (pick) setTargetWalletId(pick.id);
+  }, [open, wallets, targetWalletId]);
   const { data: categories = [] } = useQuery<Category[]>({ queryKey: ["/api/categories"] });
   const { data: allSections = [] } = useSections();
 
@@ -290,6 +308,11 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
           input: { rows, target_wallet_id: targetWalletId },
         },
       );
+      try {
+        localStorage.setItem(LAST_WALLET_KEY, targetWalletId);
+      } catch {
+        // Remembering the wallet is a convenience; ignore storage errors.
+      }
       // Persist any remembered merchant→category rules so future imports and
       // manual entry auto-categorize them. Best-effort — a failed rule save
       // shouldn't fail the import that already succeeded.

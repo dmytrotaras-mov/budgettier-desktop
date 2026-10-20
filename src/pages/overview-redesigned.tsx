@@ -9,7 +9,7 @@ import { format, startOfMonth, endOfMonth, addMonths, subMonths } from "date-fns
 import { useCurrency } from "@/hooks/useCurrency";
 import ResponsiveContainer from "@/components/layout/responsive-container";
 import { useSections, sectionEmoji, resolveCategorySection } from "@/lib/sectionUtils";
-import { CategoryBreakdown, breakdownColor } from "@/components/overview/category-breakdown";
+import { CategoryBreakdown, BreakdownTabs, breakdownColor, type BreakdownMode } from "@/components/overview/category-breakdown";
 import {
   calculateYearOverview,
   calculateYearsProgress,
@@ -196,57 +196,12 @@ function renderExpandedPanel(panelId: string, data: any, formatCurrency: (amount
     }
 
     case 'top-categories': {
-      const displayData = data.categoryViewMode === "head-categories" ? data.headCategoryArray : data.categoryData;
+      const displayData = data.categoryViewMode === "groups" ? data.headCategoryArray : data.categoryData;
 
       return (
         <div className="p-4 md:p-6">
-          {/* Hero switcher and header in one row */}
-          <div className="flex items-center justify-between mb-4 md:mb-6">
-            {/* Switcher on the left */}
-            <div className="relative">
-              <button
-                onClick={() => data.setModalCategoryDropdownOpen(!data.modalCategoryDropdownOpen)}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                <span className="text-sm md:text-base font-medium text-gray-900">
-                  {data.categoryViewMode === "categories" ? "Categories" : "Head Categories"}
-                </span>
-                <ChevronDown size={16} className="text-gray-600" />
-              </button>
-
-              {data.modalCategoryDropdownOpen && (
-                <div
-                  className="absolute top-full left-0 mt-2 bg-white rounded-xl shadow-lg border border-gray-200 z-50 min-w-[180px]"
-                  style={{ boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }}
-                >
-                  <button
-                    onClick={() => {
-                      data.setCategoryViewMode("categories");
-                      data.setModalCategoryDropdownOpen(false);
-                    }}
-                    className="w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors flex items-center justify-between rounded-t-xl"
-                  >
-                    <span className="text-sm font-medium text-gray-900">Categories</span>
-                    {data.categoryViewMode === "categories" && <Check size={16} className="text-gray-900" />}
-                  </button>
-                  <button
-                    onClick={() => {
-                      data.setCategoryViewMode("head-categories");
-                      data.setModalCategoryDropdownOpen(false);
-                    }}
-                    className="w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors flex items-center justify-between rounded-b-xl"
-                  >
-                    <span className="text-sm font-medium text-gray-900">Head Categories</span>
-                    {data.categoryViewMode === "head-categories" && <Check size={16} className="text-gray-900" />}
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Total count on the right */}
-            <span className="text-xs text-gray-500">
-              {displayData.length} {displayData.length === 1 ? 'item' : 'items'}
-            </span>
+          <div className="mb-3">
+            <BreakdownTabs mode={data.categoryViewMode} onChange={data.setCategoryViewMode} />
           </div>
 
           <CategoryBreakdown
@@ -268,10 +223,22 @@ export default function OverviewRedesignedPage() {
   const [viewMode, setViewMode] = useState<"month" | "year">("month");
   const [expandedPanel, setExpandedPanel] = useState<string | null>(null);
   const [healthPanelMode, setHealthPanelMode] = useState<"savings" | "budget">("savings");
-  const [categoryViewMode, setCategoryViewMode] = useState<"categories" | "head-categories">("categories");
+  const [categoryViewMode, setCategoryViewModeState] = useState<BreakdownMode>(() => {
+    try {
+      return localStorage.getItem("overviewCategoryView") === "categories" ? "categories" : "groups";
+    } catch {
+      return "groups";
+    }
+  });
+  const setCategoryViewMode = (mode: BreakdownMode) => {
+    setCategoryViewModeState(mode);
+    try {
+      localStorage.setItem("overviewCategoryView", mode);
+    } catch {
+      // Remembering the view is a convenience; ignore storage errors.
+    }
+  };
   const [categoryFlowMode, setCategoryFlowMode] = useState<"expense" | "income">("expense");
-  const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
-  const [modalCategoryDropdownOpen, setModalCategoryDropdownOpen] = useState(false);
 
   const [chartDataVisibility, setChartDataVisibility] = useState({
     income: true,
@@ -374,9 +341,10 @@ export default function OverviewRedesignedPage() {
     [categorySpending]
   );
 
-  // Group categories by head category (section)
+  // Group categories by head category (section), keeping each group's
+  // categories so the breakdown can open a group.
   const headCategoryArray = useMemo(() => {
-    const acc: Record<string, { name: string; amount: number; emoji: string; categories: string[] }> = {};
+    const acc: Record<string, { name: string; amount: number; emoji: string; children: Record<string, { name: string; emoji: string; amount: number }> }> = {};
     for (const t of transactionsArray) {
       if (t.type !== categoryFlowMode || t.excludeFromBudget) continue;
       const category = categoryMap.get(t.categoryId);
@@ -384,32 +352,30 @@ export default function OverviewRedesignedPage() {
       // Same resolution Settings uses: DB section → manual assignment →
       // built-in membership → "Custom Categories".
       const section = resolveCategorySection(category);
+      const amount = parseFloat(t.amount);
 
-      if (!acc[section]) {
-        acc[section] = {
-          name: section,
-          amount: 0,
-          emoji: sectionEmoji(allSections, section, categoryFlowMode),
-          categories: []
-        };
-      }
-
-      acc[section].amount += parseFloat(t.amount);
-      if (!acc[section].categories.includes(categoryName)) {
-        acc[section].categories.push(categoryName);
-      }
+      const group = (acc[section] ??= {
+        name: section,
+        amount: 0,
+        emoji: sectionEmoji(allSections, section, categoryFlowMode),
+        children: {},
+      });
+      group.amount += amount;
+      const child = (group.children[categoryName] ??= { name: categoryName, emoji: category?.emoji || "💰", amount: 0 });
+      child.amount += amount;
     }
 
     return Object.values(acc)
       .map((section) => ({
         name: section.name,
         amount: Number(section.amount),
-        emoji: section.emoji
+        emoji: section.emoji,
+        children: Object.values(section.children).sort((a, b) => b.amount - a.amount),
       }))
       .sort((a, b) => b.amount - a.amount);
   }, [transactionsArray, categoryMap, categoryFlowMode, allSections]);
 
-  const displayCategoryData = categoryViewMode === "head-categories" ? headCategoryArray : categoryData;
+  const displayCategoryData = categoryViewMode === "groups" ? headCategoryArray : categoryData;
 
   const currentMonthProgression = useMemo(
     () => viewMode === "month" ? calculateCurrentMonthProgression(allTransactions, selectedDate) : null,
@@ -794,46 +760,7 @@ export default function OverviewRedesignedPage() {
             {/* Panel 3: Categories */}
             <div className="bg-white overflow-hidden overview-panel" style={{ aspectRatio: '525 / 310.5', borderRadius: '20px', display: 'flex', flexDirection: 'column' }}>
               <div style={{ padding: '15px 20px', borderBottom: '1px solid #F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div className="relative">
-                  <button
-                    onClick={() => setCategoryDropdownOpen(!categoryDropdownOpen)}
-                    className="flex items-center gap-2 hover:opacity-70 transition-opacity"
-                  >
-                    <h2 style={{ fontFamily: 'Inter', fontSize: '24px', fontWeight: 500, color: '#000' }}>
-                      {categoryViewMode === "categories" ? "Categories" : "Head Categories"}
-                    </h2>
-                    <ChevronDown size={18} style={{ color: '#000' }} />
-                  </button>
-
-                  {/* Dropdown Menu */}
-                  {categoryDropdownOpen && (
-                    <div
-                      className="absolute top-full left-0 mt-2 bg-white rounded-xl shadow-lg border border-gray-200 z-50 min-w-[200px]"
-                      style={{ boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }}
-                    >
-                      <button
-                        onClick={() => {
-                          setCategoryViewMode("categories");
-                          setCategoryDropdownOpen(false);
-                        }}
-                        className="w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors flex items-center justify-between rounded-t-xl"
-                      >
-                        <span className="text-sm font-medium text-gray-900">Categories</span>
-                        {categoryViewMode === "categories" && <Check size={16} className="text-gray-900" />}
-                      </button>
-                      <button
-                        onClick={() => {
-                          setCategoryViewMode("head-categories");
-                          setCategoryDropdownOpen(false);
-                        }}
-                        className="w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors flex items-center justify-between rounded-b-xl"
-                      >
-                        <span className="text-sm font-medium text-gray-900">Head Categories</span>
-                        {categoryViewMode === "head-categories" && <Check size={16} className="text-gray-900" />}
-                      </button>
-                    </div>
-                  )}
-                </div>
+                <BreakdownTabs mode={categoryViewMode} onChange={setCategoryViewMode} size="sm" />
 
                 {/* Expense / Income toggle */}
                 <div className="flex items-center gap-2">
@@ -1054,8 +981,6 @@ export default function OverviewRedesignedPage() {
               headCategoryArray,
               categoryViewMode,
               setCategoryViewMode,
-              modalCategoryDropdownOpen,
-              setModalCategoryDropdownOpen,
               totalIncome,
               totalExpenses,
               categoryFlowMode,
