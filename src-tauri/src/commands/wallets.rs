@@ -74,16 +74,19 @@ pub fn update_wallet(
     input: WalletInput,
 ) -> Result<Wallet, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
-    let balance = input.balance.unwrap_or_else(|| "0".to_string());
+    // Balance is derived from transactions; only touch it when explicitly sent.
     let updated = conn
         .execute(
-            "UPDATE wallets SET name = ?1, type = ?2, balance = ?3 WHERE id = ?4",
-            params![input.name, input.type_, balance, id],
+            "UPDATE wallets SET name = ?1, type = ?2, balance = COALESCE(?3, balance) WHERE id = ?4",
+            params![input.name, input.type_, input.balance, id],
         )
         .map_err(|e| e.to_string())?;
     if updated == 0 {
         return Err(format!("wallet {id} not found"));
     }
+    let balance: String = conn
+        .query_row("SELECT balance FROM wallets WHERE id = ?1", params![id], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
     Ok(Wallet {
         id,
         name: input.name,
@@ -99,7 +102,8 @@ pub fn delete_wallet(pool: State<DbPool>, id: String) -> Result<(), String> {
     let count: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM transactions
-             WHERE wallet_id = ?1 OR from_wallet_id = ?1 OR to_wallet_id = ?1",
+             WHERE is_opening = 0 AND
+                   (wallet_id = ?1 OR from_wallet_id = ?1 OR to_wallet_id = ?1)",
             params![id],
             |r| r.get(0),
         )
@@ -109,6 +113,12 @@ pub fn delete_wallet(pool: State<DbPool>, id: String) -> Result<(), String> {
             "Wallet has {count} transaction(s). Move or delete them first."
         ));
     }
+    // The opening balance belongs to the wallet — it goes with it.
+    conn.execute(
+        "DELETE FROM transactions WHERE wallet_id = ?1 AND is_opening = 1",
+        params![id],
+    )
+    .map_err(|e| e.to_string())?;
     let removed = conn
         .execute("DELETE FROM wallets WHERE id = ?1", params![id])
         .map_err(|e| e.to_string())?;

@@ -39,7 +39,7 @@ fn row_to_settings(row: &Row) -> rusqlite::Result<Settings> {
     })
 }
 
-fn ensure_singleton(conn: &rusqlite::Connection) -> rusqlite::Result<String> {
+pub(crate) fn ensure_singleton(conn: &rusqlite::Connection) -> rusqlite::Result<String> {
     let existing: Option<String> = conn
         .query_row("SELECT id FROM settings LIMIT 1", [], |r| r.get(0))
         .ok();

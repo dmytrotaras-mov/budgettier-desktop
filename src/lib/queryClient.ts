@@ -26,6 +26,14 @@ export async function apiRequest(
   }
 }
 
+/** Like apiRequest, but throws on failure and returns the parsed JSON body. */
+export async function apiCall<T = any>(method: string, url: string, data?: unknown): Promise<T> {
+  const res = await apiRequest(method, url, data);
+  const text = await res.text();
+  if (!res.ok) throw new Error(text || res.statusText);
+  return (text ? JSON.parse(text) : undefined) as T;
+}
+
 type UnauthorizedBehavior = "returnNull" | "throw";
 export const getQueryFn: <T>(options: {
   on401: UnauthorizedBehavior;

@@ -1,3 +1,4 @@
+pub mod auto_backup;
 pub mod backup;
 pub mod budgets;
 pub mod categories;

@@ -10,6 +10,7 @@ export function useCurrency() {
       case 'EUR': return '€';
       case 'GBP': return '£';
       case 'JPY': return '¥';
+      case 'UAH': return '₴';
       case 'USD':
       default: return '$';
     }

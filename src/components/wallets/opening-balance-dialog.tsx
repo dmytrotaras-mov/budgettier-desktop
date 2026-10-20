@@ -84,6 +84,7 @@ export default function OpeningBalanceDialog({ open, onClose, walletId, walletNa
       });
       queryClient.invalidateQueries({ queryKey: ["/api/wallets"] });
       queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/opening-balance"] });
       toast({
         title: "Opening balance saved",
         description: `${walletName} now starts from €${Number(normalized).toFixed(2)} on ${date}.`,

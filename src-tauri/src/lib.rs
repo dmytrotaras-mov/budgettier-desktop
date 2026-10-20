@@ -14,6 +14,7 @@ pub fn run() {
         .setup(|app| {
             // Open SQLite, run migrations, register the pool as managed state.
             let pool = db::init(app.handle()).expect("failed to initialize database");
+            commands::auto_backup::start_scheduler(pool.clone());
             app.manage(pool);
             // Build native macOS menu and wire ⌘, → JS event.
             menu::build(app)?;
@@ -46,6 +47,10 @@ pub fn run() {
             commands::backup::backup_db,
             commands::backup::restore_db,
             commands::backup::export_csv,
+            commands::auto_backup::get_backup_status,
+            commands::auto_backup::set_auto_backup,
+            commands::auto_backup::backup_now,
+            commands::auto_backup::reveal_backup_folder,
             commands::category_rules::get_category_rules,
             commands::category_rules::create_category_rule,
             commands::category_rules::delete_category_rule,

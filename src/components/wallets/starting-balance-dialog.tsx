@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { invoke } from "@tauri-apps/api/core";
 import { useCurrency } from "@/hooks/useCurrency";
 import { Wallet as WalletIcon, DollarSign, CreditCard, Plus, X } from "lucide-react";
 import type { Wallet } from "@shared/schema";
@@ -85,8 +86,12 @@ export default function StartingBalanceDialog({ isOpen, onClose }: StartingBalan
   });
 
   const adjustBalanceMutation = useMutation({
+    // Starting money is stored as the wallet's opening balance (balances are
+    // derived from transactions, so writing the balance column wouldn't stick).
     mutationFn: ({ id, newBalance }: { id: string; newBalance: string }) =>
-      apiRequest("POST", `/api/wallets/${id}/adjust-balance`, { newBalance, createTransaction: false }),
+      invoke("set_opening_balance", {
+        input: { walletId: id, amount: newBalance, date: new Date().toISOString().slice(0, 10) },
+      }),
     onError: (error: any) => {
       toast({
         title: "Error adjusting balance",
