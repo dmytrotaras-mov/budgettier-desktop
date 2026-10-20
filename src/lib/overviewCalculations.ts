@@ -40,6 +40,12 @@ export function calculateYearOverview(transactions: any[], selectedDate: Date, c
       else if (t.type === "expense") expenses += amount;
     }
 
+    // Months still ahead, or with no data at all, are gaps — not zeros (a
+    // zero would draw every line crashing to the axis at the end of the year).
+    if (!hasTransactions || monthStart > new Date()) {
+      return { month, income: null, expenses: null, savings: null, balance: null };
+    }
+
     const balanceAtMonthEnd = calculateCumulativeBalance(transactions, monthEnd, currentWalletBalance);
 
     return {
@@ -47,7 +53,7 @@ export function calculateYearOverview(transactions: any[], selectedDate: Date, c
       income,
       expenses,
       savings: income - expenses,
-      balance: hasTransactions ? balanceAtMonthEnd : null
+      balance: balanceAtMonthEnd
     };
   });
 }
@@ -153,26 +159,46 @@ export function calculateCurrentMonthProgression(transactions: any[], selectedDa
     averageDaily[day] = data.length > 0 ? data.reduce((sum, val) => sum + val, 0) / data.length : 0;
   }
 
-  // Build chart data. Omit `average` field entirely if data is too thin —
-  // recharts will then not render the line.
-  const chartData: { day: number; currentMonth?: number; average?: number }[] = [];
+  // Build chart data. Omit `average`/`range` entirely if data is too thin —
+  // recharts will then not render them.
+  //   range    — [lowest, highest] cumulative spend of past months by that day
+  //   forecast — from today to month end: spent so far + what a usual month
+  //              still adds from here (current month only)
+  const chartData: { day: number; currentMonth?: number; average?: number; range?: [number, number]; forecast?: number }[] = [];
   let cumulativeCurrent = 0;
+  let spentToday = 0;
 
   for (let day = 1; day <= daysInMonth; day++) {
     cumulativeCurrent += currentMonthDaily[day];
-    const dataPoint: { day: number; currentMonth?: number; average?: number } = { day };
+    const dataPoint: (typeof chartData)[number] = { day };
     if (hasEnoughAverageData) {
       dataPoint.average = averageDaily[day] || 0;
+      // "Usual" leaves out the single cheapest and priciest month once there
+      // are enough of them, so one exceptional month doesn't stretch the band.
+      const values = [...previousMonthsData[day]].sort((a, b) => a - b);
+      const trimmed = values.length >= 5 ? values.slice(1, -1) : values;
+      if (trimmed.length) dataPoint.range = [trimmed[0], trimmed[trimmed.length - 1]];
     }
     if (!isFutureMonth && day <= today) {
       dataPoint.currentMonth = cumulativeCurrent;
+      if (day === today) spentToday = cumulativeCurrent;
     }
     chartData.push(dataPoint);
   }
 
+  if (isCurrentMonth && hasEnoughAverageData) {
+    const base = averageDaily[today] || 0;
+    for (const point of chartData) {
+      if (point.day >= today) point.forecast = spentToday + Math.max(0, (averageDaily[point.day] || 0) - base);
+    }
+  }
+
+  const lastForecast = chartData[chartData.length - 1]?.forecast;
+
   return {
     chartData,
     totalSpent: cumulativeCurrent,
+    projectedTotal: lastForecast ?? null,
     isCurrentMonth,
     todayDay: isCurrentMonth ? today : null,
     hasEnoughAverageData,

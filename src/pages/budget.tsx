@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Wallet as WalletIcon, PiggyBank } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import TransactionForm from "@/components/track/transaction-form";
@@ -8,7 +8,7 @@ import BudgetTransactionPanel from "@/components/budget/budget-transaction-panel
 import BudgetPlanPanel from "@/components/budget/budget-plan-panel";
 import ResponsiveContainer from "@/components/layout/responsive-container";
 import { startOfMonth, endOfMonth, format, addMonths, subMonths } from "date-fns";
-import { useCurrency } from "@/hooks/useCurrency";
+import { StatsBar } from "@/components/overview/stats-bar";
 
 export default function BudgetPage() {
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -20,6 +20,9 @@ export default function BudgetPage() {
   const { data: transactions = [] } = useQuery({
     queryKey: ["/api/transactions", startOfMonth(selectedDate).toISOString(), endOfMonth(selectedDate).toISOString()],
   });
+
+  // All transactions: the stats bar compares with the previous month and draws the balance trend.
+  const { data: allTransactions = [] } = useQuery({ queryKey: ["/api/transactions"], staleTime: 60000 });
 
   // Fetch wallet data for total balance
   const { data: wallets = [] } = useQuery({
@@ -38,35 +41,6 @@ export default function BudgetPage() {
     });
   }, [transactions, monthStart, monthEnd]);
 
-  // Memoize financial calculations (budget page excludes transactions marked as excludeFromBudget)
-  const { totalIncome, totalExpenses, savings, savingsRate } = useMemo(() => {
-    const income = filteredTransactions
-      .filter((t: any) => t.type === "income" && !t.excludeFromBudget)
-      .reduce((sum: number, t: any) => sum + parseFloat(t.amount), 0);
-
-    const expenses = filteredTransactions
-      .filter((t: any) => t.type === "expense" && !t.excludeFromBudget)
-      .reduce((sum: number, t: any) => sum + parseFloat(t.amount), 0);
-
-    const calculatedSavings = income - expenses;
-    const rate = income > 0 ? (calculatedSavings / income) * 100 : 0;
-
-    return {
-      totalIncome: income,
-      totalExpenses: expenses,
-      savings: calculatedSavings,
-      savingsRate: rate
-    };
-  }, [filteredTransactions]);
-
-  // Memoize total balance calculation (always actual, not filtered by month)
-  const totalBalance = useMemo(() => {
-    return (wallets as any[]).reduce((sum: number, wallet: any) =>
-      sum + parseFloat(wallet.balance || "0"), 0
-    );
-  }, [wallets]);
-
-  const { formatCurrency } = useCurrency();
 
   // Memoize event handlers to prevent child re-renders
   const handlePreviousMonth = useCallback(() => {
@@ -166,106 +140,28 @@ export default function BudgetPage() {
               </Button>
             </div>
 
-            {/* Current Month Button - Tablet/Desktop: on the right */}
-            <div className="hidden sm:flex sm:w-[150px] sm:justify-end sm:min-h-[48px]">
+            {/* Back to the current month — same control as on Overview */}
+            <div className="hidden sm:flex sm:w-[150px] sm:justify-end items-center sm:min-h-[40px]">
               {!isCurrentMonth && (
-                <Button
-                  variant="outline"
-                  size="sm"
+                <button
+                  type="button"
                   onClick={handleCurrentMonth}
-                  style={{
-                    fontFamily: 'Inter',
-                    fontSize: '14px',
-                    fontWeight: 500,
-                    height: '48px',
-                    minHeight: '48px',
-                    padding: '0 20px',
-                    borderRadius: '30px'
-                  }}
+                  className="h-9 px-3.5 rounded-full text-[13px] font-medium text-gray-600 hover:bg-white hover:text-black transition-colors whitespace-nowrap"
                 >
-                  Current Month
-                </Button>
+                  Today
+                </button>
               )}
             </div>
           </div>
         </div>
 
-        {/* Top Stats Panels */}
-        <div
-          className="bg-white w-full gap-[15px] sm:gap-[15px] p-[8px] sm:p-[15px] rounded-[12px] sm:rounded-[20px]"
-          style={{
-            minHeight: '80px',
-            display: 'flex',
-            flexWrap: 'wrap',
-            alignItems: 'center',
-            marginBottom: '11px'
-          }}
-        >
-          {/* Income */}
-          <div className="stat-box flex flex-col justify-center items-center sm:items-start" style={{ flex: '1 1 auto', minWidth: '120px' }}>
-            <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
-              <TrendingUp className="w-[16px] h-[16px] sm:w-[20px] sm:h-[20px]" style={{ color: '#48EB87' }} />
-              <p className="text-[13px] sm:text-[15px]" style={{ fontFamily: 'Inter', fontWeight: 400, color: '#000' }}>Income</p>
-            </div>
-            <p className="text-[20px] sm:text-[24px]" style={{ fontFamily: 'Inter', fontWeight: 700, color: '#000' }}>
-              {formatCurrency(totalIncome)}
-            </p>
-          </div>
-
-          {/* Expenses */}
-          <div className="stat-box flex flex-col justify-center items-center sm:items-start" style={{ flex: '1 1 auto', minWidth: '120px' }}>
-            <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
-              <TrendingDown className="w-[16px] h-[16px] sm:w-[20px] sm:h-[20px]" style={{ color: '#ED4040' }} />
-              <p className="text-[13px] sm:text-[15px]" style={{ fontFamily: 'Inter', fontWeight: 400, color: '#000' }}>Expenses</p>
-            </div>
-            <p className="text-[20px] sm:text-[24px]" style={{ fontFamily: 'Inter', fontWeight: 700, color: '#000' }}>
-              {formatCurrency(totalExpenses)}
-            </p>
-          </div>
-
-          {/* Savings */}
-          <div className="stat-box flex flex-col justify-center items-center sm:items-start" style={{ flex: '1 1 auto', minWidth: '120px' }}>
-            <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
-              <PiggyBank className="w-[16px] h-[16px] sm:w-[20px] sm:h-[20px]" style={{ color: '#EDE140' }} />
-              <p className="text-[13px] sm:text-[15px]" style={{ fontFamily: 'Inter', fontWeight: 400, color: '#000' }}>Savings</p>
-            </div>
-            <div className="flex items-center gap-1 sm:gap-2">
-              <p className="text-[20px] sm:text-[24px]" style={{ fontFamily: 'Inter', fontWeight: 700, color: '#000' }}>
-                {formatCurrency(savings)}
-              </p>
-              <span
-                className="text-[8px] sm:text-[10px] px-[4px] sm:px-[6px] py-[1px] sm:py-[2px]"
-                style={{
-                  fontFamily: 'Inter',
-                  fontWeight: 700,
-                  color: '#000',
-                  backgroundColor: '#EDE140',
-                  borderRadius: '4px'
-                }}
-              >
-                {savingsRate.toFixed(0)}%
-              </span>
-            </div>
-          </div>
-
-          {/* Total Balance */}
-          <div
-            className="stat-box flex flex-col justify-center items-center sm:items-start rounded-[12px] sm:rounded-[20px] p-[10px] sm:p-[16px_20px]"
-            style={{
-              flex: '1 1 auto',
-              backgroundColor: '#F3F4F6',
-              minWidth: '120px'
-            }}
-          >
-            <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
-              <WalletIcon className="w-[16px] h-[16px] sm:w-[20px] sm:h-[20px]" style={{ color: '#000' }} />
-              <p className="text-[13px] sm:text-[15px]" style={{ fontFamily: 'Inter', fontWeight: 400, color: '#000' }}>Balance</p>
-            </div>
-            <p className="text-[20px] sm:text-[24px]" style={{ fontFamily: 'Inter', fontWeight: 700, color: '#000' }}>
-              {formatCurrency(totalBalance)}
-            </p>
-          </div>
-        </div>
+        <StatsBar
+          selectedDate={selectedDate}
+          viewMode="month"
+          transactions={filteredTransactions}
+          allTransactions={allTransactions as any[]}
+          wallets={wallets as any[]}
+        />
 
         {/* Mobile Panel Toggle Buttons - Only show on mobile (below 768px) */}
         <div className="flex md:hidden gap-0" style={{ marginBottom: '0' }}>

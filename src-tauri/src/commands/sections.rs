@@ -4,9 +4,9 @@
 // reference a section by NAME in `categories.section`, so renaming a section
 // cascades the new name onto its categories in the same SQL transaction.
 //
-// Built-in sections (is_default = 1) can be renamed but not deleted; "deleting"
-// one resets it to its default name. Hidden sections (the internal "System"
-// group for Opening Balance) are never editable from the UI.
+// Deleting a section moves its categories to another section of the same type
+// (or leaves them ungrouped) — built-in sections included. Hidden sections
+// (the internal "System" group for Opening Balance) are never editable.
 //
 // import_legacy_sections performs the one-time move of section data that used
 // to live in the webview's localStorage (renames, emojis, custom sections,
@@ -26,6 +26,7 @@ pub struct Section {
     pub type_: String,
     pub name: String,
     pub emoji: Option<String>,
+    pub color: Option<String>,
     #[serde(rename = "sortOrder")]
     pub sort_order: i64,
     #[serde(rename = "isDefault")]
@@ -33,7 +34,29 @@ pub struct Section {
     pub hidden: bool,
 }
 
-const SECTION_COLS: &str = "id, type, name, emoji, sort_order, is_default, hidden";
+const SECTION_COLS: &str = "id, type, name, emoji, sort_order, is_default, hidden, color";
+
+/// The validated categorical palette, in order (see migration v8). New groups
+/// take the first color no visible group of the same type uses yet.
+pub(crate) const GROUP_PALETTE: [&str; 8] =
+    ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"];
+const GROUP_FALLBACK: &str = "#64748b";
+
+fn next_group_color(conn: &Connection, type_: &str) -> rusqlite::Result<String> {
+    let mut stmt = conn.prepare("SELECT color FROM sections WHERE type = ?1 AND hidden = 0 AND color IS NOT NULL")?;
+    let used: Vec<String> = stmt
+        .query_map(params![type_], |r| r.get::<_, String>(0))?
+        .collect::<Result<_, _>>()?;
+    Ok(GROUP_PALETTE
+        .iter()
+        .find(|c| !used.iter().any(|u| u.eq_ignore_ascii_case(c)))
+        .unwrap_or(&GROUP_FALLBACK)
+        .to_string())
+}
+
+fn valid_hex(c: &str) -> bool {
+    c.len() == 7 && c.starts_with('#') && c[1..].chars().all(|ch| ch.is_ascii_hexdigit())
+}
 
 fn row_to_section(row: &Row) -> rusqlite::Result<Section> {
     Ok(Section {
@@ -44,6 +67,7 @@ fn row_to_section(row: &Row) -> rusqlite::Result<Section> {
         sort_order: row.get(4)?,
         is_default: row.get::<_, i64>(5)? != 0,
         hidden: row.get::<_, i64>(6)? != 0,
+        color: row.get(7)?,
     })
 }
 
@@ -105,6 +129,7 @@ pub struct CreateSectionInput {
     pub type_: String,
     pub name: String,
     pub emoji: Option<String>,
+    pub color: Option<String>,
 }
 
 #[tauri::command]
@@ -127,10 +152,14 @@ pub fn create_section(pool: State<DbPool>, input: CreateSectionInput) -> Result<
         .map_err(|e| e.to_string())?;
     let id = format!("custom_{}", Uuid::new_v4().simple());
     let emoji = input.emoji.filter(|e| !e.trim().is_empty());
+    let color = match input.color.filter(|c| valid_hex(c)) {
+        Some(c) => c,
+        None => next_group_color(&conn, &input.type_).map_err(|e| e.to_string())?,
+    };
     conn.execute(
-        "INSERT INTO sections (id, type, name, emoji, sort_order, is_default, hidden)
-         VALUES (?1, ?2, ?3, ?4, ?5, 0, 0)",
-        params![id, input.type_, name, emoji, next_order],
+        "INSERT INTO sections (id, type, name, emoji, sort_order, is_default, hidden, color)
+         VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, ?6)",
+        params![id, input.type_, name, emoji, next_order, color],
     )
     .map_err(|e| e.to_string())?;
     find_section(&conn, &id)
@@ -142,6 +171,7 @@ pub fn create_section(pool: State<DbPool>, input: CreateSectionInput) -> Result<
 pub struct UpdateSectionInput {
     pub name: Option<String>,
     pub emoji: Option<String>,
+    pub color: Option<String>,
 }
 
 #[tauri::command]
@@ -169,6 +199,13 @@ pub fn update_section(
         tx.execute("UPDATE sections SET emoji = ?1 WHERE id = ?2", params![emoji, id])
             .map_err(|e| e.to_string())?;
     }
+    if let Some(color) = input.color {
+        if !valid_hex(&color) {
+            return Err(format!("invalid color: {color}"));
+        }
+        tx.execute("UPDATE sections SET color = ?1 WHERE id = ?2", params![color, id])
+            .map_err(|e| e.to_string())?;
+    }
     let updated = find_section(&tx, &id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "section vanished after update".to_string())?;
@@ -178,51 +215,58 @@ pub fn update_section(
 
 #[derive(Debug, Serialize)]
 pub struct DeleteSectionResult {
-    /// Built-in section: name was reset to its default instead of deleting.
-    pub reset: bool,
-    /// Custom section: number of categories moved to "Custom Categories".
+    /// Number of categories moved to `moved_to` (or left ungrouped).
     #[serde(rename = "movedCategories")]
     pub moved_categories: usize,
+    /// Name of the section they moved to; None = ungrouped.
+    #[serde(rename = "movedTo")]
+    pub moved_to: Option<String>,
 }
 
-#[tauri::command]
-pub fn delete_section(pool: State<DbPool>, id: String) -> Result<DeleteSectionResult, String> {
-    let mut conn = pool.get().map_err(|e| e.to_string())?;
+pub fn delete_section_with(
+    conn: &mut Connection,
+    id: &str,
+    move_to: Option<&str>,
+) -> Result<DeleteSectionResult, String> {
     let tx = conn.transaction().map_err(|e| e.to_string())?;
-    let section = find_section(&tx, &id)
+    let section = find_section(&tx, id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("section {id} not found"))?;
     if section.hidden {
         return Err("This section can't be deleted".into());
     }
-
-    let result = if section.is_default {
-        let default_name: Option<String> = tx
-            .query_row(
-                "SELECT default_name FROM sections WHERE id = ?1",
-                params![id],
-                |r| r.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-        let default_name = default_name.unwrap_or_else(|| section.name.clone());
-        if default_name == section.name {
-            return Err("Built-in sections can't be deleted".into());
+    let target = match move_to {
+        None => None,
+        Some(t) => {
+            let target = find_section(&tx, t)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| "The group to move to no longer exists".to_string())?;
+            if target.id == section.id || target.hidden || target.type_ != section.type_ {
+                return Err("Pick another group of the same type".into());
+            }
+            Some(target.name)
         }
-        rename_section(&tx, &section, &default_name)?;
-        DeleteSectionResult { reset: true, moved_categories: 0 }
-    } else {
-        let moved = tx
-            .execute(
-                "UPDATE categories SET section = NULL WHERE type = ?1 AND section = ?2",
-                params![section.type_, section.name],
-            )
-            .map_err(|e| e.to_string())?;
-        tx.execute("DELETE FROM sections WHERE id = ?1", params![id])
-            .map_err(|e| e.to_string())?;
-        DeleteSectionResult { reset: false, moved_categories: moved }
     };
+    let moved = tx
+        .execute(
+            "UPDATE categories SET section = ?1 WHERE type = ?2 AND section = ?3",
+            params![target, section.type_, section.name],
+        )
+        .map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM sections WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
-    Ok(result)
+    Ok(DeleteSectionResult { moved_categories: moved, moved_to: target })
+}
+
+#[tauri::command]
+pub fn delete_section(
+    pool: State<DbPool>,
+    id: String,
+    move_to: Option<String>,
+) -> Result<DeleteSectionResult, String> {
+    let mut conn = pool.get().map_err(|e| e.to_string())?;
+    delete_section_with(&mut conn, &id, move_to.as_deref().filter(|t| !t.is_empty()))
 }
 
 /// Most recently used categories of a type, newest first — derived from
@@ -385,10 +429,11 @@ fn apply_legacy_for_type(
             }
             Some(_) => {}
             None => {
+                let color = next_group_color(&conn, type_).map_err(|e| e.to_string())?;
                 conn.execute(
-                    "INSERT INTO sections (id, type, name, emoji, sort_order, is_default, hidden)
-                     VALUES (?1, ?2, ?3, ?4, 100, 0, 0)",
-                    params![format!("custom_{}", Uuid::new_v4().simple()), type_, name, emoji],
+                    "INSERT INTO sections (id, type, name, emoji, sort_order, is_default, hidden, color)
+                     VALUES (?1, ?2, ?3, ?4, 100, 0, 0, ?5)",
+                    params![format!("custom_{}", Uuid::new_v4().simple()), type_, name, emoji, color],
                 )
                 .map_err(|e| e.to_string())?;
                 summary.sections_created += 1;
@@ -477,6 +522,30 @@ mod tests {
     //! Usage: BUDGETTIER_TEST_DB=/path/to/copy.db BUDGETTIER_TEST_LEGACY=/path/legacy.json \
     //!        cargo test --lib sections -- --nocapture
     use super::*;
+
+    #[test]
+    fn deleting_a_group_moves_its_categories() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO sections (id, type, name, sort_order, is_default, hidden) VALUES
+                ('k', 'expense', 'Katya', 50, 0, 0), ('f', 'expense', 'Fun', 51, 0, 0), ('i', 'income', 'Side', 52, 0, 0);
+             INSERT INTO categories (id, name, type, section) VALUES
+                ('g', 'Katya Gym', 'expense', 'Katya'), ('t', 'Katya Transport', 'expense', 'Katya');",
+        )
+        .unwrap();
+        assert!(delete_section_with(&mut conn, "k", Some("i")).is_err(), "types must match");
+        let res = delete_section_with(&mut conn, "k", Some("f")).unwrap();
+        assert_eq!(res.moved_categories, 2);
+        assert_eq!(res.moved_to.as_deref(), Some("Fun"));
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM categories WHERE section = 'Fun'", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 2);
+        // A built-in group can be deleted too; its categories become ungrouped.
+        let builtin: String = conn
+            .query_row("SELECT id FROM sections WHERE is_default = 1 AND hidden = 0 AND type = 'expense' LIMIT 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(delete_section_with(&mut conn, &builtin, None).unwrap().moved_to, None);
+    }
 
     #[test]
     fn migrate_and_import_real_copy() {

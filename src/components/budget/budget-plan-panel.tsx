@@ -9,13 +9,13 @@ import { Target, Plus } from "lucide-react";
 import { format, getDaysInMonth, isSameMonth } from "date-fns";
 import { invoke } from "@tauri-apps/api/core";
 import { PillTabs } from "@/components/overview/category-breakdown";
-import { BudgetStatusList, type BudgetItem, type BudgetView, type UnbudgetedItem } from "./budget-status-list";
+import { BudgetStatusList, BudgetSummary, type BudgetItem, type BudgetView, type UnbudgetedItem } from "./budget-status-list";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { useCurrency } from "@/hooks/useCurrency";
 import type { Transaction, Category, BudgetCategoryAllocation } from "@shared/schema";
 import CategorySelector from "@/components/track/category-selector-redesigned";
-import { useSections, visibleSections, resolveCategorySection, isHiddenCategory, UNGROUPED_SECTION_NAME } from "@/lib/sectionUtils";
+import { useSections, visibleSections, resolveCategorySection, isHiddenCategory, sectionColor, UNGROUPED_SECTION_NAME } from "@/lib/sectionUtils";
 
 // Category emojis and sections mapping
 const categoryEmojis = {
@@ -289,33 +289,54 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
         className="bg-white overflow-hidden"
         style={{ flex: 1, aspectRatio: '525 / 632', minWidth: 0, display: 'flex', flexDirection: 'column', borderRadius: '20px' }}
       >
-        {/* Header */}
-        <div style={{ padding: '15px 20px', borderBottom: '1px solid #F3F4F6' }}>
-          <div className="hidden md:flex items-center justify-between mb-3">
-            <h2 style={{ fontFamily: 'Inter', fontSize: '24px', fontWeight: 500, color: '#000' }}>
+        {/* Header — same two-row grid as the Transactions panel: title, tabs
+            and the add button on one line; the month summary on the second. */}
+        <div style={{ padding: '16px 20px 14px', borderBottom: '1px solid #F3F4F6' }}>
+          <div className="flex items-center gap-x-4 gap-y-2 flex-wrap">
+            <h2 className="hidden md:block" style={{ fontFamily: 'Inter', fontSize: '22px', fontWeight: 500, color: '#000' }}>
               Budget
             </h2>
-          </div>
-
-          <div className="flex items-center justify-between gap-2">
             <PillTabs
               tabs={[["status", "Status"], ["groups", "Groups"]]}
               value={budgetView}
               onChange={setBudgetView}
+              size="sm"
             />
             <Button
               onClick={handleOpenEditModal}
               title="Add a category to the budget"
-              style={{ height: '48px', minHeight: '48px', minWidth: '48px', width: '48px', borderRadius: '30px' }}
-              className="bg-[#F3F4F6] text-black hover:bg-black hover:text-white p-0"
+              aria-label="Add a category to the budget"
+              style={{ height: 40, width: 40, minWidth: 40, padding: 0, borderRadius: 30 }}
+              className="bg-[#F3F4F6] text-black hover:bg-black hover:text-white ml-auto"
             >
               <Plus className="w-5 h-5" />
             </Button>
           </div>
+
+          {budgetData?.exists && budgetAllocations.length > 0 && (
+            <div className="mt-3 min-h-[58px]">
+              <BudgetSummary
+                items={statusItems}
+                monthName={format(selectedDate, "MMMM")}
+                pace={pace}
+                daysLeft={daysLeft}
+                formatCurrency={(n) => formatCurrency(n)}
+              />
+            </div>
+          )}
         </div>
 
         {/* Content */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '4px 20px 15px' }}>
+        <div
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            padding: '0 20px 15px',
+            // Rows slide out softly under the pinned summary.
+            WebkitMaskImage: 'linear-gradient(to bottom, transparent 0, #000 14px)',
+            maskImage: 'linear-gradient(to bottom, transparent 0, #000 14px)',
+          }}
+        >
           {isBudgetLoading ? (
             <div className="flex items-center justify-center h-full">
               <div className="w-16 h-16 bg-purple-50 rounded-full flex items-center justify-center">
@@ -360,9 +381,8 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
               unbudgeted={unbudgeted}
               view={budgetView}
               sectionOrder={sectionRank}
-              monthName={format(selectedDate, "MMMM")}
+              groupColor={(section) => sectionColor(allSections, section, "expense")}
               pace={pace}
-              daysLeft={daysLeft}
               formatCurrency={(n) => formatCurrency(n)}
               onEdit={(id) => {
                 const allocation = budgetAllocations.find((a) => a.id === id);

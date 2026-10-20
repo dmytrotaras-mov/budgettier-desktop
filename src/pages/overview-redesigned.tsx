@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback } from "react";
+import { POSITIVE, NEGATIVE, INK, withAlpha } from "@/lib/colors";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -8,8 +9,15 @@ import { TrendingUp, TrendingDown, Wallet, ChevronLeft, ChevronRight, Expand, Pi
 import { format, startOfMonth, endOfMonth, addMonths, subMonths } from "date-fns";
 import { useCurrency } from "@/hooks/useCurrency";
 import ResponsiveContainer from "@/components/layout/responsive-container";
-import { useSections, sectionEmoji, resolveCategorySection } from "@/lib/sectionUtils";
-import { CategoryBreakdown, BreakdownTabs, breakdownColor, type BreakdownMode } from "@/components/overview/category-breakdown";
+import { useSections, sectionEmoji, sectionColor, categoryShade, resolveCategorySection } from "@/lib/sectionUtils";
+import { CategoryBreakdown, BreakdownTabs, PillTabs, colorOf, type BreakdownMode } from "@/components/overview/category-breakdown";
+import { OverviewCard, LegendChips, compactMoney } from "@/components/overview/overview-card";
+import { InsightsCard } from "@/components/overview/insights-card";
+import { WalletsCard } from "@/components/overview/wallets-card";
+import { StatsBar } from "@/components/overview/stats-bar";
+import { CashFlowChart, CASH_FLOW_SERIES, type CashFlowMode } from "@/components/overview/cash-flow-chart";
+import { SpendingPaceChart } from "@/components/overview/spending-pace-chart";
+import { invoke } from "@tauri-apps/api/core";
 import {
   calculateYearOverview,
   calculateYearsProgress,
@@ -17,17 +25,35 @@ import {
   getExpandedPanelTitle,
 } from "@/lib/overviewCalculations";
 
+
 function renderExpandedPanel(panelId: string, data: any, formatCurrency: (amount: number) => string): JSX.Element {
   const { chartDataVisibility, toggleDataSeries } = data || {};
 
   switch (panelId) {
     case 'monthly-progress': {
       const panel2DataSeries = [
-        { key: 'currentMonth', name: 'Current Month', color: '#ED4040' },
+        { key: 'currentMonth', name: 'Current Month', color: NEGATIVE },
         { key: 'average', name: 'Average', color: '#9ca3af' },
-        { key: 'yearIncome', name: 'Income', color: '#10b981' },
-        { key: 'yearExpenses', name: 'Expenses', color: '#ef4444' }
+        { key: 'yearIncome', name: 'Income', color: POSITIVE },
+        { key: 'yearExpenses', name: 'Expenses', color: NEGATIVE }
       ];
+
+      if (data.viewMode === 'month') {
+        return (
+          <div className="p-3 md:p-6">
+            <SpendingPaceChart
+              data={data.currentMonthProgression?.chartData ?? []}
+              monthLabel={data.monthLabel}
+              todayDay={data.currentMonthProgression?.todayDay ?? null}
+              budgetTotal={data.budgetTotal}
+              visible={data.panel2ChartVisibility}
+              formatCurrency={formatCurrency}
+              axisMoney={data.axisMoney}
+              height={440}
+            />
+          </div>
+        );
+      }
 
       return (
         <div className="p-3 md:p-6">
@@ -52,7 +78,8 @@ function renderExpandedPanel(panelId: string, data: any, formatCurrency: (amount
                 stroke="#ccc"
                 axisLine={false}
                 tickLine={false}
-                width={50}
+                width={56}
+                tickFormatter={data.axisMoney}
               />
               <Tooltip
                 contentStyle={{ backgroundColor: 'white', border: '1px solid #ccc', borderRadius: '8px', fontSize: '12px', padding: '8px' }}
@@ -63,14 +90,14 @@ function renderExpandedPanel(panelId: string, data: any, formatCurrency: (amount
                   {(data.panel2ChartVisibility?.currentMonth ?? true) && <Line
                     type="monotone"
                     dataKey="currentMonth"
-                    stroke="#ED4040"
+                    stroke={NEGATIVE}
                     strokeWidth={2}
                     dot={(props: any) => {
                       // Show dot only at today's position for current month
                       if (data.currentMonthProgression?.isCurrentMonth && props.payload.day === data.currentMonthProgression?.todayDay) {
-                        return <circle cx={props.cx} cy={props.cy} r={4} fill="#ED4040" />;
+                        return <circle key={`dot-${props.index}`} cx={props.cx} cy={props.cy} r={4} fill={NEGATIVE} />;
                       }
-                      return <circle key={props.key} cx={props.cx} cy={props.cy} r={0} fill="transparent" />;
+                      return <circle key={`dot-${props.index}`} cx={props.cx} cy={props.cy} r={0} fill="transparent" />;
                     }}
                     name="Current Month"
                     connectNulls={false}
@@ -79,8 +106,8 @@ function renderExpandedPanel(panelId: string, data: any, formatCurrency: (amount
                 </>
               ) : (
                 <>
-                  {(data.panel2ChartVisibility?.yearIncome ?? true) && <Line type="monotone" dataKey="income" stroke="#10b981" strokeWidth={2} dot={{ fill: "#10b981", r: 4 }} name="Income" />}
-                  {(data.panel2ChartVisibility?.yearExpenses ?? true) && <Line type="monotone" dataKey="expenses" stroke="#ef4444" strokeWidth={2} dot={{ fill: "#ef4444", r: 4 }} name="Expenses" />}
+                  {(data.panel2ChartVisibility?.yearIncome ?? true) && <Line type="monotone" dataKey="income" stroke={POSITIVE} strokeWidth={2} dot={{ fill: POSITIVE, r: 4 }} name="Income" />}
+                  {(data.panel2ChartVisibility?.yearExpenses ?? true) && <Line type="monotone" dataKey="expenses" stroke={NEGATIVE} strokeWidth={2} dot={{ fill: NEGATIVE, r: 4 }} name="Expenses" />}
                 </>
               )}
             </LineChart>
@@ -132,64 +159,24 @@ function renderExpandedPanel(panelId: string, data: any, formatCurrency: (amount
     }
 
     case 'year-budget': {
-      const dataSeries = [
-        { key: 'income', name: 'Income', color: '#10b981' },
-        { key: 'expenses', name: 'Expenses', color: '#ef4444' },
-        { key: 'savings', name: 'Savings', color: '#f59e0b' },
-        { key: 'balance', name: 'Balance', color: '#1f2937' }
-      ];
-
       return (
         <div className="p-3 md:p-6">
-          <div style={{ minHeight: '400px', display: 'flex', alignItems: 'center' }}>
-            <RechartsResponsiveContainer width="100%" height={400}>
-              <LineChart
-                data={data.viewMode === 'month' ? data.yearOverviewData || [] : data.multiYearBudgetData || []}
-                margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
-              >
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis
-                dataKey={data.viewMode === 'month' ? "month" : "year"}
-                tick={{ fontSize: 10, fill: "#666" }}
-                stroke="#ccc"
-                axisLine={false}
-                tickLine={false}
-              />
-              <YAxis
-                tick={{ fontSize: 11, fill: "#666" }}
-                stroke="#ccc"
-                axisLine={false}
-                tickLine={false}
-                width={50}
-              />
-              <Tooltip
-                contentStyle={{ backgroundColor: 'white', border: '1px solid #ccc', borderRadius: '8px', fontSize: '12px', padding: '8px' }}
-                formatter={(value: any) => [formatCurrency(Number(value)), '']}
-              />
-              {(chartDataVisibility?.income ?? true) && <Line type="monotone" dataKey="income" stroke="#10b981" strokeWidth={2} dot={{ fill: "#10b981", r: 4 }} name="Income" />}
-              {(chartDataVisibility?.expenses ?? true) && <Line type="monotone" dataKey="expenses" stroke="#ef4444" strokeWidth={2} dot={{ fill: "#ef4444", r: 4 }} name="Expenses" />}
-              {(chartDataVisibility?.savings ?? true) && <Line type="monotone" dataKey="savings" stroke="#f59e0b" strokeWidth={2} dot={{ fill: "#f59e0b", r: 4 }} name="Savings" />}
-              {(chartDataVisibility?.balance ?? true) && <Line type="monotone" dataKey="balance" stroke="#1f2937" strokeWidth={2.5} dot={{ fill: "#1f2937", r: 4 }} name="Balance" connectNulls={false} />}
-            </LineChart>
-          </RechartsResponsiveContainer>
-          </div>
-
-          <div className="mt-4 md:mt-8 flex flex-nowrap gap-3 md:gap-6 justify-center px-2">
-            {dataSeries.map((series) => (
-              <div key={series.key} className="flex flex-col items-center gap-1.5 md:gap-2">
-                <Checkbox
-                  id={`checkbox-${series.key}`}
-                  checked={chartDataVisibility?.[series.key as keyof typeof chartDataVisibility] ?? true}
-                  onCheckedChange={() => toggleDataSeries?.(series.key as keyof typeof chartDataVisibility)}
-                  className="data-[state=checked]:border-0 w-6 h-6 md:w-5 md:h-5"
-                  style={{
-                    backgroundColor: (chartDataVisibility?.[series.key as keyof typeof chartDataVisibility] ?? true) ? series.color : 'transparent',
-                    borderColor: series.color
-                  }}
-                />
-                <label htmlFor={`checkbox-${series.key}`} className="cursor-pointer text-[10px] md:text-sm font-medium text-center leading-tight">{series.name}</label>
-              </div>
-            ))}
+          <LegendChips
+            items={CASH_FLOW_SERIES.map((s) => ({ ...s, active: chartDataVisibility?.[s.key] ?? true }))}
+            onToggle={(k) => toggleDataSeries?.(k)}
+          />
+          <div className="mt-3">
+            <CashFlowChart
+              data={(data.viewMode === "month" ? data.yearOverviewData : data.multiYearBudgetData) || []}
+              xKey={data.viewMode === "month" ? "month" : "year"}
+              selected={data.cashFlowSelected}
+              inProgress={data.cashFlowInProgress}
+              visible={chartDataVisibility}
+              mode={data.cashFlowMode}
+              formatCurrency={formatCurrency}
+              axisMoney={data.axisMoney}
+              height={420}
+            />
           </div>
         </div>
       );
@@ -222,7 +209,6 @@ export default function OverviewRedesignedPage() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<"month" | "year">("month");
   const [expandedPanel, setExpandedPanel] = useState<string | null>(null);
-  const [healthPanelMode, setHealthPanelMode] = useState<"savings" | "budget">("savings");
   const [categoryViewMode, setCategoryViewModeState] = useState<BreakdownMode>(() => {
     try {
       return localStorage.getItem("overviewCategoryView") === "categories" ? "categories" : "groups";
@@ -239,17 +225,35 @@ export default function OverviewRedesignedPage() {
     }
   };
   const [categoryFlowMode, setCategoryFlowMode] = useState<"expense" | "income">("expense");
+  const [cashFlowMode, setCashFlowModeState] = useState<CashFlowMode>(() => {
+    try {
+      return localStorage.getItem("cashFlowMode") === "lines" ? "lines" : "bars";
+    } catch {
+      return "bars";
+    }
+  });
+  const setCashFlowMode = (mode: CashFlowMode) => {
+    setCashFlowModeState(mode);
+    try {
+      localStorage.setItem("cashFlowMode", mode);
+    } catch {
+      // Remembering the view is a convenience; ignore storage errors.
+    }
+  };
 
   const [chartDataVisibility, setChartDataVisibility] = useState({
     income: true,
     expenses: true,
-    savings: true,
+    savings: false,
     balance: true
   });
 
   const [panel2ChartVisibility, setPanel2ChartVisibility] = useState({
     currentMonth: true,
     average: true,
+    range: true,
+    forecast: true,
+    budget: true,
     yearIncome: true,
     yearExpenses: true
   });
@@ -279,7 +283,7 @@ export default function OverviewRedesignedPage() {
     queryKey: ["/api/transactions"],
     staleTime: 60000, // 1 min staleTime for the full dataset to reduce refetches
   });
-  const { formatCurrency } = useCurrency();
+  const { formatCurrency, currencySymbol } = useCurrency();
 
   // Build category lookup Map for O(1) access instead of .find() in loops
   const categoryMap = useMemo(() => {
@@ -366,16 +370,33 @@ export default function OverviewRedesignedPage() {
     }
 
     return Object.values(acc)
-      .map((section) => ({
-        name: section.name,
-        amount: Number(section.amount),
-        emoji: section.emoji,
-        children: Object.values(section.children).sort((a, b) => b.amount - a.amount),
-      }))
+      .map((section) => {
+        const color = sectionColor(allSections, section.name, categoryFlowMode);
+        const children = Object.values(section.children).sort((a, b) => b.amount - a.amount);
+        return {
+          name: section.name,
+          amount: Number(section.amount),
+          emoji: section.emoji,
+          color,
+          // Categories wear shades of their group's color, darkest = biggest.
+          children: children.map((c, i) => ({ ...c, color: categoryShade(color, i, children.length) })),
+        };
+      })
       .sort((a, b) => b.amount - a.amount);
   }, [transactionsArray, categoryMap, categoryFlowMode, allSections]);
 
-  const displayCategoryData = categoryViewMode === "groups" ? headCategoryArray : categoryData;
+  // Flat category list colored like the groups view: each category keeps its shade.
+  const categoryColors = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const g of headCategoryArray) for (const c of g.children) m.set(c.name, c.color);
+    return m;
+  }, [headCategoryArray]);
+
+  const coloredCategoryData = useMemo(
+    () => categoryData.map((c: any) => ({ ...c, color: categoryColors.get(c.name) })),
+    [categoryData, categoryColors],
+  );
+  const displayCategoryData = categoryViewMode === "groups" ? headCategoryArray : coloredCategoryData;
 
   const currentMonthProgression = useMemo(
     () => viewMode === "month" ? calculateCurrentMonthProgression(allTransactions, selectedDate) : null,
@@ -396,6 +417,64 @@ export default function OverviewRedesignedPage() {
   const handleNextMonth = useCallback(() => setSelectedDate(viewMode === "month" ? addMonths(selectedDate, 1) : new Date(selectedDate.getFullYear() + 1, 0, 1)), [viewMode, selectedDate]);
   const handleToday = useCallback(() => setSelectedDate(new Date()), []);
 
+  const axisMoney = compactMoney(currencySymbol);
+
+  // The selected month's budget, for the Insights card.
+  const monthKey = format(selectedDate, "yyyy-MM");
+  const { data: monthBudget } = useQuery<any>({
+    queryKey: ["budget-month", monthKey],
+    queryFn: () => invoke("get_month_budget", { month: monthKey }),
+    enabled: viewMode === "month",
+  });
+
+  const budgetTotal: number | null =
+    viewMode === "month" && monthBudget?.exists && monthBudget.allocations?.length
+      ? monthBudget.allocations.reduce((sum: number, a: any) => sum + parseFloat(a.allocatedAmount || "0"), 0)
+      : null;
+
+  // One-line takeaway for the pace card: how far along vs a usual month.
+  const roundMoney = (n: number) => formatCurrency(Math.round(n)).replace(/\.00$/, "");
+  const paceSubtitle = (() => {
+    if (viewMode === "year") return "Total income and spending for each year";
+    const p = currentMonthProgression;
+    if (!p) return "";
+    const point = p.isCurrentMonth ? p.chartData[(p.todayDay ?? 1) - 1] : p.chartData[p.chartData.length - 1];
+    const spent = point?.currentMonth ?? p.totalSpent;
+    if (!p.hasEnoughAverageData || point?.average === undefined) {
+      return `${roundMoney(spent)} spent ${p.isCurrentMonth ? "so far" : `in ${format(selectedDate, "MMMM")}`}`;
+    }
+    const when = p.isCurrentMonth ? `by day ${p.todayDay}` : `in ${format(selectedDate, "MMMM")}`;
+    if (p.isCurrentMonth && p.projectedTotal != null) {
+      const vsBudget = budgetTotal
+        ? p.projectedTotal > budgetTotal
+          ? ` · ${roundMoney(p.projectedTotal - budgetTotal)} over budget`
+          : ` · within the ${roundMoney(budgetTotal)} budget`
+        : "";
+      return `${roundMoney(spent)} ${when} · heading for ${roundMoney(p.projectedTotal)}${vsBudget}`;
+    }
+    const diff = spent - point.average;
+    return `${roundMoney(spent)} ${when} · ${roundMoney(Math.abs(diff))} ${diff > 0 ? "above" : "below"} a usual month`;
+  })();
+
+  const cashFlowSelected = viewMode === "month" ? format(selectedDate, "MMM") : String(selectedDate.getFullYear());
+  const cashFlowInProgress =
+    viewMode === "month"
+      ? selectedDate.getFullYear() === new Date().getFullYear() ? format(new Date(), "MMM") : null
+      : String(new Date().getFullYear());
+
+  // Cash flow takeaway: how much was saved across the visible periods.
+  const cashFlowSubtitle = (() => {
+    // Completed periods only: an unfinished month (salary not in yet) would skew it.
+    const xKey = viewMode === "month" ? "month" : "year";
+    const rows: any[] = ((viewMode === "month" ? yearOverviewData : multiYearBudgetData) || []).filter(
+      (r: any) => r.income !== null && r[xKey] !== cashFlowInProgress,
+    );
+    if (!rows.length) return "Income and spending per month · line: balance";
+    const saved = rows.reduce((sum: number, r: any) => sum + (r.savings ?? 0), 0);
+    const scope = rows.length === 1 ? `in ${rows[0][xKey]}` : `${rows[0][xKey]}–${rows[rows.length - 1][xKey]}`;
+    return `${saved >= 0 ? "Saved" : "Overspent"} ${roundMoney(Math.abs(saved))} ${scope} · ${cashFlowMode === "bars" ? "bars" : "lines"}: income vs spending · black line: balance`;
+  })();
+
   const isCurrentPeriod = viewMode === "month"
     ? format(selectedDate, "yyyy-MM") === format(new Date(), "yyyy-MM")
     : selectedDate.getFullYear() === new Date().getFullYear();
@@ -405,557 +484,215 @@ export default function OverviewRedesignedPage() {
       <div className="flex-1 overflow-auto pb-20 md:pb-0" style={{ backgroundColor: '#F3F4F6' }}>
         <ResponsiveContainer className="py-8">
 
-          {/* Calendar Switcher */}
-          <div className="flex flex-col items-center mb-4 gap-2">
-            {/* Month/Year Navigation and Current Month Button */}
-            <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-0 w-full sm:justify-between">
-              {/* Spacer for desktop to center the month switcher */}
-              <div className="hidden sm:block sm:w-[150px]"></div>
-
-              {/* Month/Year Navigation - centered */}
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handlePreviousMonth}
-                  className="h-10 w-10 p-0 hover:bg-white"
-                  style={{ borderRadius: '30px' }}
-                >
-                  <ChevronLeft style={{ width: '26px', height: '26px' }} />
-                </Button>
-
-                <div
-                  onClick={(e) => {
-                    // Toggle on mobile and tablet (screen width < 1024px)
-                    if (window.innerWidth < 1024) {
-                      setViewMode(viewMode === "month" ? "year" : "month");
-                    }
-                  }}
-                  className="lg:cursor-default cursor-pointer"
-                  style={{
-                    fontFamily: 'Inter',
-                    fontSize: '20px',
-                    fontWeight: 500,
-                    minWidth: '200px',
-                    textAlign: 'center'
-                  }}
-                >
-                  {viewMode === "month" ? format(selectedDate, "MMMM yyyy") : format(selectedDate, "yyyy")}
-                </div>
-
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleNextMonth}
-                  className="h-10 w-10 p-0 hover:bg-white"
-                  style={{ borderRadius: '30px' }}
-                >
-                  <ChevronRight style={{ width: '26px', height: '26px' }} />
-                </Button>
+          {/* Period switcher: month/year navigation, back-to-today, Month | Year */}
+          <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-0 w-full sm:justify-between mb-4">
+            <div className="hidden sm:block sm:w-[190px]" />
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={handlePreviousMonth} className="h-10 w-10 p-0 hover:bg-white" style={{ borderRadius: 30 }} aria-label="Previous">
+                <ChevronLeft style={{ width: 26, height: 26 }} />
+              </Button>
+              <div style={{ fontFamily: "Inter", fontSize: 20, fontWeight: 500, minWidth: 200, textAlign: "center" }}>
+                {viewMode === "month" ? format(selectedDate, "MMMM yyyy") : format(selectedDate, "yyyy")}
               </div>
-
-              {/* Right side: Current Period Button (tablet/desktop) + View Mode Selector (desktop only) */}
-              <div className="hidden sm:flex sm:w-[150px] sm:justify-end items-center gap-2 sm:min-h-[48px]">
-                {/* Current Period Button - Tablet/Desktop: on the right */}
-                {!isCurrentPeriod && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleToday}
-                    style={{
-                      fontFamily: 'Inter',
-                      fontSize: '14px',
-                      fontWeight: 500,
-                      height: '48px',
-                      minHeight: '48px',
-                      padding: '0 20px',
-                      borderRadius: '30px'
-                    }}
-                  >
-                    {viewMode === "month" ? "Current Month" : "Current Year"}
-                  </Button>
-                )}
-                {/* View Mode Toggle - shown only on desktop (≥1024px) */}
-                <div className="hidden lg:block">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setViewMode(viewMode === "month" ? "year" : "month")}
-                    style={{
-                      width: '140px',
-                      height: '48px',
-                      minHeight: '48px',
-                      fontFamily: 'Inter',
-                      fontSize: '14px',
-                      fontWeight: 500,
-                      borderRadius: '30px'
-                    }}
-                  >
-                    {viewMode === "month" ? "Month" : "Year"}
-                  </Button>
-                </div>
-              </div>
+              <Button variant="ghost" size="sm" onClick={handleNextMonth} className="h-10 w-10 p-0 hover:bg-white" style={{ borderRadius: 30 }} aria-label="Next">
+                <ChevronRight style={{ width: 26, height: 26 }} />
+              </Button>
+            </div>
+            <div className="flex sm:w-[190px] sm:justify-end items-center gap-2">
+              {!isCurrentPeriod && (
+                <button
+                  type="button"
+                  onClick={handleToday}
+                  className="h-9 px-3.5 rounded-full text-[13px] font-medium text-gray-600 hover:bg-white hover:text-black transition-colors whitespace-nowrap"
+                >
+                  Today
+                </button>
+              )}
+              <PillTabs
+                tabs={[["month", "Month"], ["year", "Year"]]}
+                value={viewMode}
+                onChange={(v) => setViewMode(v)}
+                size="sm"
+              />
             </div>
           </div>
 
-          {/* Stats Panel */}
-          <div
-            className="bg-white w-full gap-[15px] sm:gap-[15px] p-[8px] sm:p-[15px] rounded-[12px] sm:rounded-[20px]"
-            style={{
-              minHeight: '80px',
-              display: 'flex',
-              flexWrap: 'wrap',
-              alignItems: 'center',
-              marginBottom: '11px'
-            }}
-          >
-            {/* Income */}
-            <div className="stat-box flex flex-col justify-center items-center sm:items-start" style={{ flex: '1 1 auto', minWidth: '120px' }}>
-              <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
-                <TrendingUp className="w-[16px] h-[16px] sm:w-[20px] sm:h-[20px]" style={{ color: '#48EB87' }} />
-                <p className="text-[13px] sm:text-[15px]" style={{ fontFamily: 'Inter', fontWeight: 400, color: '#000' }}>Income</p>
-              </div>
-              <p className="text-[20px] sm:text-[24px]" style={{ fontFamily: 'Inter', fontWeight: 700, color: '#000' }}>
-                {formatCurrency(totalIncome)}
-              </p>
-            </div>
+          <StatsBar
+            selectedDate={selectedDate}
+            viewMode={viewMode}
+            transactions={transactionsArray}
+            allTransactions={allTransactions}
+            wallets={wallets}
+          />
 
-            {/* Expenses */}
-            <div className="stat-box flex flex-col justify-center items-center sm:items-start" style={{ flex: '1 1 auto', minWidth: '120px' }}>
-              <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
-                <TrendingDown className="w-[16px] h-[16px] sm:w-[20px] sm:h-[20px]" style={{ color: '#ED4040' }} />
-                <p className="text-[13px] sm:text-[15px]" style={{ fontFamily: 'Inter', fontWeight: 400, color: '#000' }}>Expenses</p>
-              </div>
-              <p className="text-[20px] sm:text-[24px]" style={{ fontFamily: 'Inter', fontWeight: 700, color: '#000' }}>
-                {formatCurrency(totalExpenses)}
-              </p>
-            </div>
-
-            {/* Savings */}
-            <div className="stat-box flex flex-col justify-center items-center sm:items-start" style={{ flex: '1 1 auto', minWidth: '120px' }}>
-              <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
-                <PiggyBank className="w-[16px] h-[16px] sm:w-[20px] sm:h-[20px]" style={{ color: '#EDE140' }} />
-                <p className="text-[13px] sm:text-[15px]" style={{ fontFamily: 'Inter', fontWeight: 400, color: '#000' }}>Savings</p>
-              </div>
-              <div className="flex items-center gap-1 sm:gap-2">
-                <p className="text-[20px] sm:text-[24px]" style={{ fontFamily: 'Inter', fontWeight: 700, color: '#000' }}>
-                  {formatCurrency(totalIncome - totalExpenses)}
-                </p>
-                <span
-                  className="text-[8px] sm:text-[10px] px-[4px] sm:px-[6px] py-[1px] sm:py-[2px]"
-                  style={{
-                    fontFamily: 'Inter',
-                    fontWeight: 700,
-                    color: '#000',
-                    backgroundColor: '#EDE140',
-                    borderRadius: '4px'
-                  }}
-                >
-                  {savingsRate.toFixed(0)}%
-                </span>
-              </div>
-            </div>
-
-            {/* Total Balance */}
-            <div
-              className="stat-box flex flex-col justify-center items-center sm:items-start rounded-[12px] sm:rounded-[20px] p-[10px] sm:p-[16px_20px]"
-              style={{
-                flex: '1 1 auto',
-                backgroundColor: '#F3F4F6',
-                minWidth: '120px'
-              }}
-            >
-              <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
-                <Wallet className="w-[16px] h-[16px] sm:w-[20px] sm:h-[20px]" style={{ color: '#000' }} />
-                <p className="text-[13px] sm:text-[15px]" style={{ fontFamily: 'Inter', fontWeight: 400, color: '#000' }}>Balance</p>
-              </div>
-              <p className="text-[20px] sm:text-[24px]" style={{ fontFamily: 'Inter', fontWeight: 700, color: '#000' }}>
-                {formatCurrency(balance)}
-              </p>
-            </div>
-          </div>
-
-          {/* 4 Panels Grid */}
+          {/* Cards */}
           <style>{`
-            /* Mobile: 1:1 aspect ratio for panels */
             @media (max-width: 767px) {
-              .overview-panel {
-                aspect-ratio: 1 / 1 !important;
-              }
+              .overview-panel { aspect-ratio: 1 / 1 !important; }
             }
           `}</style>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-[11px]">
 
-            {/* Panel 1: Year Financial Overview */}
-            <div className="bg-white overflow-hidden overview-panel" style={{ aspectRatio: '525 / 310.5', borderRadius: '20px', display: 'flex', flexDirection: 'column' }}>
-              <div style={{ padding: '15px 20px', borderBottom: '1px solid #F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div>
-                  <h2 style={{ fontFamily: 'Inter', fontSize: '24px', fontWeight: 500, color: '#000' }}>
-                    Year
-                  </h2>
-                  {viewMode === "month" && (
-                    <p style={{ fontFamily: 'Inter', fontSize: '11px', color: '#9CA3AF', marginTop: 2 }}>
-                      {format(selectedDate, 'MMM yyyy')} highlighted
-                    </p>
-                  )}
-                </div>
-                <button
-                  onClick={() => setExpandedPanel('year-budget')}
-                  style={{
-                    width: '48px',
-                    height: '48px',
-                    minWidth: '48px',
-                    minHeight: '48px',
-                    backgroundColor: '#fff',
-                    border: '1px solid #F3F4F6',
-                    borderRadius: '30px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer'
-                  }}
-                  className="hover:bg-gray-50"
-                >
-                  <Expand size={18} style={{ color: '#000' }} />
-                </button>
+            {/* 1. Cash flow by month (or by year) */}
+            <OverviewCard
+              title={viewMode === "month" ? `Cash flow ${selectedDate.getFullYear()}` : "Cash flow by year"}
+              subtitle={cashFlowSubtitle}
+              actions={
+                <PillTabs
+                  tabs={[["bars", "Bars"], ["lines", "Lines"]]}
+                  value={cashFlowMode}
+                  onChange={setCashFlowMode}
+                  size="sm"
+                />
+              }
+              onExpand={() => setExpandedPanel("year-budget")}
+              className="md:col-span-2"
+              style={{ height: 380 }}
+            >
+              <LegendChips
+                items={CASH_FLOW_SERIES.map((s) => ({ ...s, active: chartDataVisibility[s.key as keyof typeof chartDataVisibility] }))}
+                onToggle={(k) => toggleDataSeries(k as keyof typeof chartDataVisibility)}
+              />
+              <div className="flex-1 min-h-0 px-3 pb-2 pt-2">
+                <CashFlowChart
+                  data={(viewMode === "month" ? yearOverviewData : multiYearBudgetData) || []}
+                  xKey={viewMode === "month" ? "month" : "year"}
+                  selected={cashFlowSelected}
+                  inProgress={cashFlowInProgress}
+                  visible={chartDataVisibility}
+                  mode={cashFlowMode}
+                  formatCurrency={formatCurrency}
+                  axisMoney={axisMoney}
+                />
               </div>
-              <div style={{ flex: 1, padding: '10px 20px', overflowY: 'auto', display: 'flex', alignItems: 'center' }}>
-                <RechartsResponsiveContainer width="100%" height="100%">
-                  <LineChart
-                    data={viewMode === "month" ? yearOverviewData || [] : multiYearBudgetData || []}
-                    margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                    <XAxis
-                      dataKey={viewMode === "month" ? "month" : "year"}
-                      tick={{ fontSize: 11, fill: "#666" }}
-                      stroke="#ccc"
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <YAxis
-                      tick={{ fontSize: 11, fill: "#666" }}
-                      stroke="#ccc"
-                      axisLine={false}
-                      tickLine={false}
-                      width={35}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: 'white',
-                        border: '1px solid #ccc',
-                        borderRadius: '8px',
-                        fontSize: '12px',
-                        padding: '10px'
-                      }}
-                      formatter={(value: any) => [formatCurrency(Number(value)), '']}
-                    />
-                    {/* Vertical line marking the user's currently-selected month */}
-                    {viewMode === "month" && (
-                      <ReferenceLine
-                        x={format(selectedDate, 'MMM')}
-                        stroke="#9CA3AF"
-                        strokeDasharray="4 4"
-                        ifOverflow="extendDomain"
+            </OverviewCard>
+
+            {/* 2. Spending pace this month (or year over year) */}
+            <OverviewCard
+              title={viewMode === "month" ? "Spending pace" : "Year over year"}
+              subtitle={paceSubtitle}
+              onExpand={() => setExpandedPanel("monthly-progress")}
+              className="overview-panel"
+              style={{ aspectRatio: "525 / 310.5" }}
+            >
+              <LegendChips
+                items={
+                  viewMode === "month"
+                    ? [
+                        { key: "currentMonth", label: format(selectedDate, "MMMM"), color: NEGATIVE, active: panel2ChartVisibility.currentMonth },
+                        ...(currentMonthProgression?.hasEnoughAverageData
+                          ? [{ key: "range", label: "Usual range", color: "#C4C8CE", active: panel2ChartVisibility.range }]
+                          : []),
+                        ...(currentMonthProgression?.projectedTotal != null
+                          ? [{ key: "forecast", label: "Forecast", color: NEGATIVE, dashed: true, active: panel2ChartVisibility.forecast }]
+                          : []),
+                        ...(budgetTotal ? [{ key: "budget", label: "Budget", color: "#6B7280", active: panel2ChartVisibility.budget }] : []),
+                      ]
+                    : [
+                        { key: "yearIncome", label: "Income", color: POSITIVE, active: panel2ChartVisibility.yearIncome },
+                        { key: "yearExpenses", label: "Expenses", color: NEGATIVE, active: panel2ChartVisibility.yearExpenses },
+                      ]
+                }
+                onToggle={(k) => togglePanel2DataSeries(k as keyof typeof panel2ChartVisibility)}
+              />
+              <div className="flex-1 min-h-0 px-3 pb-3 pt-2">
+                {viewMode === "month" ? (
+                  <SpendingPaceChart
+                    data={currentMonthProgression?.chartData ?? []}
+                    monthLabel={format(selectedDate, "MMMM")}
+                    todayDay={currentMonthProgression?.todayDay ?? null}
+                    budgetTotal={budgetTotal}
+                    visible={panel2ChartVisibility}
+                    formatCurrency={formatCurrency}
+                    axisMoney={axisMoney}
+                  />
+                ) : (
+                  <RechartsResponsiveContainer width="100%" height="100%">
+                    <LineChart data={yearsProgressData || []} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                      <CartesianGrid stroke="#F1F2F4" vertical={false} />
+                      <XAxis dataKey="year" tick={{ fontSize: 11, fill: "#6B7280" }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 11, fill: "#6B7280" }} axisLine={false} tickLine={false} width={48} tickFormatter={axisMoney} />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: "white", border: "1px solid #E5E7EB", borderRadius: 12, fontSize: 12, padding: "8px 10px" }}
+                        formatter={(value: any, name: string) => [formatCurrency(Number(value)), name]}
                       />
-                    )}
-                    {chartDataVisibility.income && <Line type="monotone" dataKey="income" stroke="#10b981" strokeWidth={2.5} dot={{ fill: "#10b981", r: 4 }} name="Income" />}
-                    {chartDataVisibility.expenses && <Line type="monotone" dataKey="expenses" stroke="#ef4444" strokeWidth={2.5} dot={{ fill: "#ef4444", r: 4 }} name="Expenses" />}
-                    {chartDataVisibility.savings && <Line type="monotone" dataKey="savings" stroke="#f59e0b" strokeWidth={2.5} dot={{ fill: "#f59e0b", r: 4 }} name="Savings" />}
-                    {chartDataVisibility.balance && <Line type="monotone" dataKey="balance" stroke="#1f2937" strokeWidth={3} dot={{ fill: "#1f2937", r: 5 }} name="Balance" connectNulls={false} />}
-                  </LineChart>
-                </RechartsResponsiveContainer>
+                      {panel2ChartVisibility.yearIncome && <Line type="monotone" dataKey="income" stroke={POSITIVE} strokeWidth={2} dot={false} activeDot={{ r: 4 }} name="Income" />}
+                      {panel2ChartVisibility.yearExpenses && <Line type="monotone" dataKey="expenses" stroke={NEGATIVE} strokeWidth={2} dot={false} activeDot={{ r: 4 }} name="Expenses" />}
+                    </LineChart>
+                  </RechartsResponsiveContainer>
+                )}
               </div>
-            </div>
+            </OverviewCard>
 
-            {/* Panel 2: Monthly Spending Progress */}
-            <div className="bg-white overflow-hidden overview-panel" style={{ aspectRatio: '525 / 310.5', borderRadius: '20px', display: 'flex', flexDirection: 'column' }}>
-              <div style={{ padding: '15px 20px', borderBottom: '1px solid #F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <h2 style={{ fontFamily: 'Inter', fontSize: '24px', fontWeight: 500, color: '#000' }}>
-                  {viewMode === "month" ? "Month" : "Year-over-Year Progress"}
-                </h2>
-                <button
-                  onClick={() => setExpandedPanel('monthly-progress')}
-                  style={{
-                    width: '48px',
-                    height: '48px',
-                    minWidth: '48px',
-                    minHeight: '48px',
-                    backgroundColor: '#fff',
-                    border: '1px solid #F3F4F6',
-                    borderRadius: '30px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer'
-                  }}
-                  className="hover:bg-gray-50"
-                >
-                  <Expand size={18} style={{ color: '#000' }} />
-                </button>
-              </div>
-              <div style={{ flex: 1, padding: '10px 20px', overflowY: 'auto', display: 'flex', alignItems: 'center' }}>
-                <RechartsResponsiveContainer width="100%" height="100%">
-                  <LineChart
-                    data={viewMode === "month" ? currentMonthProgression?.chartData : yearsProgressData || []}
-                    margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                    <XAxis
-                      dataKey={viewMode === "month" ? "day" : "year"}
-                      tick={{ fontSize: 11, fill: "#666" }}
-                      stroke="#ccc"
-                      type={viewMode === "month" ? "number" : "category"}
-                      domain={viewMode === "month" ? [1, 31] : undefined}
-                      ticks={viewMode === "month" ? [1, 5, 10, 15, 20, 25, 30] : undefined}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <YAxis tick={{ fontSize: 11, fill: "#666" }} stroke="#ccc" axisLine={false} tickLine={false} width={35} />
-                    <Tooltip
-                      contentStyle={{ backgroundColor: 'white', border: '1px solid #ccc', borderRadius: '6px', fontSize: '12px', padding: '10px' }}
-                      labelFormatter={(value: any) => {
-                        if (viewMode === "month") {
-                          const day = Number(value);
-                          const suffix = day === 1 || day === 21 || day === 31 ? 'st' : day === 2 || day === 22 ? 'nd' : day === 3 || day === 23 ? 'rd' : 'th';
-                          return `${day}${suffix}`;
-                        }
-                        return value;
-                      }}
-                      formatter={(value: any, name: string) => {
-                        const label = name === 'currentMonth' ? 'Current Month' : name === 'average' ? 'Average' : name;
-                        return [formatCurrency(Number(value)), label];
-                      }}
-                    />
-                    {viewMode === "month" ? (
-                      <>
-                        {panel2ChartVisibility.currentMonth && <Line
-                          type="monotone"
-                          dataKey="currentMonth"
-                          stroke="#ED4040"
-                          strokeWidth={2.5}
-                          dot={(props: any) => {
-                            // Show dot only at today's position for current month
-                            if (currentMonthProgression?.isCurrentMonth && props.payload.day === currentMonthProgression?.todayDay) {
-                              return <circle cx={props.cx} cy={props.cy} r={4} fill="#ED4040" />;
-                            }
-                            return <circle key={props.key} cx={props.cx} cy={props.cy} r={0} fill="transparent" />;
-                          }}
-                          name="currentMonth"
-                          connectNulls={false}
-                        />}
-                        {panel2ChartVisibility.average && <Line type="monotone" dataKey="average" stroke="#9ca3af" strokeWidth={2} strokeDasharray="5 5" dot={false} name="average" connectNulls={true} />}
-                      </>
-                    ) : (
-                      <>
-                        {panel2ChartVisibility.yearIncome && <Line type="monotone" dataKey="income" stroke="#10b981" strokeWidth={2.5} dot={{ fill: "#10b981", r: 4 }} name="Income" />}
-                        {panel2ChartVisibility.yearExpenses && <Line type="monotone" dataKey="expenses" stroke="#ef4444" strokeWidth={2.5} dot={{ fill: "#ef4444", r: 4 }} name="Expenses" />}
-                      </>
-                    )}
-                  </LineChart>
-                </RechartsResponsiveContainer>
-              </div>
-            </div>
-
-            {/* Panel 3: Categories */}
-            <div className="bg-white overflow-hidden overview-panel" style={{ aspectRatio: '525 / 310.5', borderRadius: '20px', display: 'flex', flexDirection: 'column' }}>
-              <div style={{ padding: '15px 20px', borderBottom: '1px solid #F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            {/* 3. Categories */}
+            <OverviewCard
+              title={categoryFlowMode === "expense" ? "Spending by category" : "Income by category"}
+              subtitle={`${formatCurrency(categoryFlowMode === "expense" ? totalExpenses : totalIncome)} · ${displayCategoryData.length} ${
+                categoryViewMode === "groups" ? (displayCategoryData.length === 1 ? "group" : "groups") : displayCategoryData.length === 1 ? "category" : "categories"
+              }`}
+              actions={
+                <PillTabs
+                  tabs={[["expense", "Expense"], ["income", "Income"]]}
+                  value={categoryFlowMode}
+                  onChange={setCategoryFlowMode}
+                  size="sm"
+                />
+              }
+              onExpand={() => setExpandedPanel("top-categories")}
+              className="overview-panel"
+              style={{ aspectRatio: "525 / 310.5" }}
+            >
+              <div className="px-5 pb-2">
                 <BreakdownTabs mode={categoryViewMode} onChange={setCategoryViewMode} size="sm" />
-
-                {/* Expense / Income toggle */}
-                <div className="flex items-center gap-2">
-                  <div className="flex" style={{ marginRight: '8px' }}>
-                    <button
-                      onClick={() => setCategoryFlowMode("expense")}
-                      style={{
-                        height: '36px',
-                        backgroundColor: categoryFlowMode === "expense" ? '#F3F4F6' : '#fff',
-                        border: '1px solid #F3F4F6',
-                        borderRadius: '30px 0 0 30px',
-                        fontFamily: 'Inter',
-                        fontSize: '12px',
-                        fontWeight: 500,
-                        color: '#000',
-                        padding: '0 14px',
-                        cursor: 'pointer'
-                      }}
-                      className="hover:bg-gray-50"
-                    >
-                      Expense
-                    </button>
-                    <button
-                      onClick={() => setCategoryFlowMode("income")}
-                      style={{
-                        height: '36px',
-                        backgroundColor: categoryFlowMode === "income" ? '#F3F4F6' : '#fff',
-                        border: '1px solid #F3F4F6',
-                        borderLeft: 'none',
-                        borderRadius: '0 30px 30px 0',
-                        fontFamily: 'Inter',
-                        fontSize: '12px',
-                        fontWeight: 500,
-                        color: '#000',
-                        padding: '0 14px',
-                        cursor: 'pointer'
-                      }}
-                      className="hover:bg-gray-50"
-                    >
-                      Income
-                    </button>
-                  </div>
-                <button
-                  onClick={() => setExpandedPanel('top-categories')}
-                  style={{
-                    width: '48px',
-                    height: '48px',
-                    minWidth: '48px',
-                    minHeight: '48px',
-                    backgroundColor: '#fff',
-                    border: '1px solid #F3F4F6',
-                    borderRadius: '30px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer'
-                  }}
-                  className="hover:bg-gray-50"
-                >
-                  <Expand size={18} style={{ color: '#000' }} />
-                </button>
-                </div>
               </div>
-              <div style={{ flex: 1, padding: '15px 20px', overflowY: 'auto' }}>
-                {/* Single column list - similar to mobile */}
-                <div className="space-y-2">
+              <div className="flex-1 overflow-y-auto px-5 pb-4">
+                <div className="flex flex-col gap-1">
                   {displayCategoryData.length === 0 ? (
-                    <p style={{ color: '#9CA3AF', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>
-                      No {categoryFlowMode} transactions in this period.
-                    </p>
-                  ) : displayCategoryData.slice(0, 5).map((category, index) => {
-                    const totalForPercent = categoryFlowMode === "expense" ? totalExpenses : totalIncome;
-                    const percent = totalForPercent > 0 ? (category.amount / totalForPercent) * 100 : 0;
-                    return (
-                      <div key={category.name} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors">
-                        <div className="flex items-center gap-3 flex-1 min-w-0">
-                          <span className="w-1 self-stretch rounded-full flex-shrink-0" style={{ backgroundColor: breakdownColor(index) }} />
-                          <span className="text-2xl flex-shrink-0">{category.emoji}</span>
+                    <p className="text-sm text-gray-400 text-center py-6">No {categoryFlowMode} transactions in this period.</p>
+                  ) : (
+                    displayCategoryData.slice(0, 6).map((category, index) => {
+                      const totalForPercent = categoryFlowMode === "expense" ? totalExpenses : totalIncome;
+                      const percent = totalForPercent > 0 ? (category.amount / totalForPercent) * 100 : 0;
+                      return (
+                        <div key={category.name} className="flex items-center gap-3 px-2 py-2 -mx-2 rounded-xl hover:bg-gray-50 transition-colors">
+                          <span className="w-1 self-stretch rounded-full flex-shrink-0" style={{ backgroundColor: colorOf(category, index) }} />
+                          <span className="text-xl flex-shrink-0">{category.emoji}</span>
                           <div className="flex-1 min-w-0">
-                            <div className="text-sm font-semibold text-gray-900">{category.name}</div>
-                            <div className="text-xs text-gray-600">
-                              {percent.toFixed(1)}% of {categoryFlowMode === "expense" ? "expenses" : "income"}
+                            <div className="flex items-baseline justify-between gap-2">
+                              <span className="text-sm font-medium text-gray-900 truncate">{category.name}</span>
+                              <span className="text-sm font-semibold text-gray-900 tabular-nums">{formatCurrency(category.amount)}</span>
+                            </div>
+                            <div className="mt-1.5 h-1 rounded-full bg-gray-100 overflow-hidden">
+                              <div className="h-full rounded-full" style={{ width: `${Math.max(percent, 1)}%`, backgroundColor: colorOf(category, index) }} />
                             </div>
                           </div>
+                          <span className="text-xs text-gray-500 tabular-nums w-10 text-right flex-shrink-0">{percent.toFixed(0)}%</span>
                         </div>
-                        <span className="text-base font-bold text-gray-900 flex-shrink-0 ml-2">{formatCurrency(category.amount)}</span>
-                      </div>
-                    );
-                  })}
+                      );
+                    })
+                  )}
                 </div>
               </div>
-            </div>
+            </OverviewCard>
 
-            {/* Panel 4: Multi-function (Savings/Budget/Actions) */}
-            <div className="bg-white overflow-hidden overview-panel" style={{ aspectRatio: '525 / 310.5', borderRadius: '20px', display: 'flex', flexDirection: 'column' }}>
-              <div style={{ padding: '15px 20px', borderBottom: '1px solid #F3F4F6' }}>
-                <div className="flex items-center justify-between">
-                  <h2 style={{ fontFamily: 'Inter', fontSize: '24px', fontWeight: 500, color: '#000' }}>
-                    Financial Health
-                  </h2>
+            {/* 4. Insights */}
+            <InsightsCard
+              transactions={allTransactions}
+              categories={categories}
+              selectedDate={selectedDate}
+              viewMode={viewMode}
+              budget={viewMode === "month" ? monthBudget : null}
+              formatCurrency={formatCurrency}
+            />
 
-                  {/* View Mode Toggle */}
-                  <div className="flex">
-                    <button
-                      onClick={() => setHealthPanelMode('savings')}
-                      style={{
-                        minWidth: '95px',
-                        height: '48px',
-                        minHeight: '48px',
-                        backgroundColor: healthPanelMode === 'savings' ? '#F3F4F6' : '#fff',
-                        border: '1px solid #F3F4F6',
-                        borderRadius: '30px 0 0 30px',
-                        fontFamily: 'Inter',
-                        fontSize: '14px',
-                        fontWeight: 500,
-                        color: '#000',
-                        padding: '0 16px'
-                      }}
-                      className="hover:bg-gray-50"
-                    >
-                      Savings
-                    </button>
-                    <button
-                      onClick={() => setHealthPanelMode('budget')}
-                      style={{
-                        minWidth: '95px',
-                        height: '48px',
-                        minHeight: '48px',
-                        backgroundColor: healthPanelMode === 'budget' ? '#F3F4F6' : '#fff',
-                        border: '1px solid #F3F4F6',
-                        borderRadius: '0 30px 30px 0',
-                        fontFamily: 'Inter',
-                        fontSize: '14px',
-                        fontWeight: 500,
-                        color: '#000',
-                        padding: '0 16px'
-                      }}
-                      className="hover:bg-gray-50"
-                    >
-                      Budget
-                    </button>
-                  </div>
-                </div>
-              </div>
-              <div style={{ flex: 1, padding: '15px 20px', overflowY: 'auto' }}>
-
-                {/* Savings View */}
-                {healthPanelMode === 'savings' && (
-                  <div className="space-y-2">
-                    <div className="p-2.5 bg-gray-50 rounded-xl">
-                      <div className="text-xs text-gray-600 mb-1">Monthly Savings Rate</div>
-                      <div className="text-lg font-bold text-gray-900">{savingsRate.toFixed(1)}%</div>
-                    </div>
-                    <div className="p-2.5 bg-gray-50 rounded-xl">
-                      <div className="text-xs text-gray-600 mb-1">Total Saved This {viewMode === 'month' ? 'Month' : 'Year'}</div>
-                      <div className="text-lg font-bold text-gray-900">{formatCurrency(totalIncome - totalExpenses)}</div>
-                    </div>
-                    <div className="p-2.5 bg-gray-50 rounded-xl">
-                      <div className="text-xs text-gray-600 mb-1">Total Balance</div>
-                      <div className="text-lg font-bold text-gray-900">{formatCurrency(balance)}</div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Budget Health View */}
-                {healthPanelMode === 'budget' && (
-                  <div className="space-y-3">
-                    <div className="p-3 bg-gray-50 rounded-xl">
-                      <div className="text-sm text-gray-600 mb-2">Budget Status</div>
-                      <div className="text-lg font-bold text-gray-900">
-                        {totalExpenses < totalIncome ? '✓ On Track' : '⚠ Over Budget'}
-                      </div>
-                      <div className="text-xs text-gray-500 mt-1">
-                        {totalExpenses < totalIncome
-                          ? `${formatCurrency(totalIncome - totalExpenses)} under budget`
-                          : `${formatCurrency(totalExpenses - totalIncome)} over budget`}
-                      </div>
-                    </div>
-
-                    <div className="p-3 bg-gray-50 rounded-xl">
-                      <div className="text-sm text-gray-600 mb-2">Top Category</div>
-                      <div className="text-lg font-bold text-gray-900">
-                        {categoryData[0]?.name || 'N/A'}
-                      </div>
-                      <div className="text-xs text-gray-500 mt-1">
-                        {categoryData[0] ? formatCurrency(categoryData[0].amount) : '-'}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-
-              </div>
-            </div>
-
+            {/* 5. Wallets */}
+            <WalletsCard
+              wallets={wallets}
+              transactions={allTransactions}
+              selectedDate={selectedDate}
+              viewMode={viewMode}
+              formatCurrency={formatCurrency}
+            />
           </div>
 
         </ResponsiveContainer>
@@ -977,7 +714,7 @@ export default function OverviewRedesignedPage() {
               yearsProgressData,
               multiYearBudgetData,
               viewMode,
-              categoryData,
+              categoryData: coloredCategoryData,
               headCategoryArray,
               categoryViewMode,
               setCategoryViewMode,
@@ -987,7 +724,13 @@ export default function OverviewRedesignedPage() {
               chartDataVisibility,
               toggleDataSeries,
               panel2ChartVisibility,
-              togglePanel2DataSeries
+              togglePanel2DataSeries,
+              axisMoney,
+              cashFlowSelected,
+              cashFlowInProgress,
+              budgetTotal,
+              cashFlowMode,
+              monthLabel: format(selectedDate, "MMMM"),
             }, formatCurrency)}
           </div>
         </DialogContent>

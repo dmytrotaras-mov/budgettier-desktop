@@ -320,6 +320,21 @@ const MIGRATIONS: &[&str] = &[
         ALTER TABLE settings ADD COLUMN auto_backup INTEGER NOT NULL DEFAULT 1;
         ALTER TABLE settings ADD COLUMN last_auto_backup INTEGER;
     "#,
+    // ---- v8: a color per category group ----
+    // Visible groups get the validated categorical palette in display order
+    // (per type); groups past the eighth fall back to a neutral slate.
+    r#"
+        ALTER TABLE sections ADD COLUMN color TEXT;
+        UPDATE sections SET color = (
+            SELECT CASE r.rn
+                WHEN 1 THEN '#2a78d6' WHEN 2 THEN '#eb6834' WHEN 3 THEN '#1baf7a'
+                WHEN 4 THEN '#eda100' WHEN 5 THEN '#e87ba4' WHEN 6 THEN '#008300'
+                WHEN 7 THEN '#6250d6' WHEN 8 THEN '#e34948' ELSE '#64748b' END
+            FROM (SELECT id, row_number() OVER (PARTITION BY type ORDER BY sort_order, name) AS rn
+                  FROM sections WHERE hidden = 0) r
+            WHERE r.id = sections.id
+        ) WHERE hidden = 0;
+    "#,
 ];
 
 /// Apply any migrations newer than the database's current `user_version`.

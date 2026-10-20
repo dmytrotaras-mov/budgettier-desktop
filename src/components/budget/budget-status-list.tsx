@@ -1,9 +1,10 @@
-// Budget panel body: "left to spend" summary with the month's pace, then each
+// Budget panel: a pinned "left to spend" summary with the month's pace, and each
 // budgeted category as a compact row, either grouped by status (what needs
 // attention first) or by section. Shares the visual language of the Overview
 // category breakdown: color stripe, emoji, thin progress bar.
 
 import { useState, type ReactNode } from "react";
+import { POSITIVE, NEGATIVE } from "@/lib/colors";
 import { ChevronDown, Check, Plus } from "lucide-react";
 
 export type BudgetView = "status" | "groups";
@@ -29,9 +30,9 @@ const NEAR_AT = 0.85; // 85% of a limit counts as "almost used up"
 const PAID_TOLERANCE = 0.02; // within ±2% of the limit = a fixed bill paid as planned
 
 const STATUS_COLOR: Record<Status, string> = {
-  over: "#EF4444",
+  over: NEGATIVE,
   near: "#F59E0B",
-  ok: "#10B981",
+  ok: POSITIVE,
   paid: "#9CA3AF",
   unused: "#E5E7EB",
 };
@@ -49,10 +50,10 @@ interface Props {
   unbudgeted: UnbudgetedItem[];
   view: BudgetView;
   sectionOrder: (section: string) => number;
-  monthName: string;
+  /** A group's color, shown as a dot in the Groups view. */
+  groupColor?: (section: string) => string;
   /** Share of the month already gone (0–1), or null for a future month. */
   pace: number | null;
-  daysLeft: number | null;
   formatCurrency: (amount: number) => string;
   onEdit: (id: string) => void;
   onAddUnbudgeted: (item: UnbudgetedItem) => void;
@@ -63,17 +64,12 @@ export function BudgetStatusList({
   unbudgeted,
   view,
   sectionOrder,
-  monthName,
+  groupColor,
   pace,
-  daysLeft,
   formatCurrency,
   onEdit,
   onAddUnbudgeted,
 }: Props) {
-  const totalBudget = items.reduce((s, i) => s + i.budget, 0);
-  const totalSpent = items.reduce((s, i) => s + i.spent, 0);
-  const left = totalBudget - totalSpent;
-  const spentShare = totalBudget > 0 ? totalSpent / totalBudget : 0;
   const unbudgetedTotal = unbudgeted.reduce((s, u) => s + u.spent, 0);
   const money = (n: number) => formatCurrency(Math.round(n)).replace(/\.00$/, "");
 
@@ -91,28 +87,6 @@ export function BudgetStatusList({
     // inline-size containment: long, truncated lines (category names) must
     // not widen the panel — and through it the whole page.
     <div className="min-w-0" style={{ contain: "inline-size" }}>
-      {/* Summary */}
-      <div className="pb-4 mb-1 border-b border-gray-100">
-        <div className="text-xs text-gray-500">{left >= 0 ? `Left to spend in ${monthName}` : `Over budget in ${monthName}`}</div>
-        <div className="text-[28px] leading-tight font-semibold tabular-nums" style={{ color: left >= 0 ? "#000" : STATUS_COLOR.over }}>
-          {money(Math.abs(left))}
-        </div>
-        <div className="text-xs text-gray-500">
-          of {money(totalBudget)}
-          {daysLeft !== null && daysLeft > 0 && (
-            <>
-              {" "}· {daysLeft} {daysLeft === 1 ? "day" : "days"} left
-              {left > 0 && <> · about {money(left / daysLeft)} a day</>}
-            </>
-          )}
-        </div>
-        <ProgressBar share={spentShare} pace={pace} color={spentShare > 1 ? STATUS_COLOR.over : "#000"} height={8} className="mt-3" />
-        <div className="flex justify-between text-[11px] text-gray-500 mt-1.5 tabular-nums">
-          <span>Spent {money(totalSpent)} · {Math.round(spentShare * 100)}%</span>
-          {pace !== null && <span>{Math.round(pace * 100)}% of the month gone</span>}
-        </div>
-      </div>
-
       {view === "status" ? (
         <>
           <Section title="Over budget" color={STATUS_COLOR.over} rows={byStatus("over")} render={row} />
@@ -142,6 +116,7 @@ export function BudgetStatusList({
               <Section
                 key={section}
                 title={section}
+                dot={groupColor?.(section)}
                 meta={`${money(spent)} / ${money(budget)}`}
                 rows={[...rows].sort((a, b) => b.item.budget - a.item.budget)}
                 render={row}
@@ -168,6 +143,56 @@ export function BudgetStatusList({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/** "Left to spend" header — pinned above the scrolling list in the panel. */
+export function BudgetSummary({
+  items,
+  monthName,
+  pace,
+  daysLeft,
+  formatCurrency,
+}: {
+  items: BudgetItem[];
+  monthName: string;
+  pace: number | null;
+  daysLeft: number | null;
+  formatCurrency: (amount: number) => string;
+}) {
+  const money = (n: number) => formatCurrency(Math.round(n)).replace(/\.00$/, "");
+  const totalBudget = items.reduce((s, i) => s + i.budget, 0);
+  const totalSpent = items.reduce((s, i) => s + i.spent, 0);
+  const left = totalBudget - totalSpent;
+  const spentShare = totalBudget > 0 ? totalSpent / totalBudget : 0;
+  const perDay = daysLeft && daysLeft > 0 && left > 0 ? left / daysLeft : null;
+  return (
+    <div
+      className="min-w-0"
+      style={{ contain: "inline-size" }}
+      title={`${monthName}: spent ${money(totalSpent)} of ${money(totalBudget)}`}
+    >
+      <div className="flex items-baseline justify-between gap-3">
+        <div className="flex items-baseline gap-1.5 min-w-0">
+          <span className="text-[22px] leading-none font-semibold tabular-nums" style={{ color: left >= 0 ? "#000" : STATUS_COLOR.over }}>
+            {money(Math.abs(left))}
+          </span>
+          <span className="text-xs text-gray-500 truncate">
+            {left >= 0 ? "left" : "over"} of {money(totalBudget)}
+          </span>
+        </div>
+        {daysLeft !== null && daysLeft > 0 && (
+          <span className="text-xs text-gray-500 whitespace-nowrap tabular-nums">
+            {daysLeft} {daysLeft === 1 ? "day" : "days"} left{perDay !== null && <> · {money(perDay)}/day</>}
+          </span>
+        )}
+      </div>
+      <ProgressBar share={spentShare} pace={pace} color={spentShare > 1 ? STATUS_COLOR.over : "#000"} height={6} className="mt-2.5" />
+      <div className="flex justify-between text-[11px] text-gray-400 mt-1 tabular-nums">
+        <span>Spent {money(totalSpent)} · {Math.round(spentShare * 100)}%</span>
+        {pace !== null && <span>{Math.round(pace * 100)}% of the month gone</span>}
+      </div>
     </div>
   );
 }
@@ -246,10 +271,11 @@ function BudgetRow({
   );
 }
 
-function SectionHeader({ title, color, meta }: { title: string; color?: string; meta?: ReactNode }) {
+function SectionHeader({ title, color, meta, dot }: { title: string; color?: string; meta?: ReactNode; dot?: string }) {
   return (
     <div className="flex items-center justify-between pt-4 pb-1">
-      <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: color ?? "#6B7280" }}>
+      <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide" style={{ color: color ?? "#6B7280" }}>
+        {dot && <span className="w-2 h-2 rounded-full" style={{ backgroundColor: dot }} />}
         {title}
       </span>
       {meta && <span className="text-[11px] text-gray-500 tabular-nums">{meta}</span>}
@@ -263,19 +289,21 @@ function Section({
   title,
   color,
   meta,
+  dot,
   rows,
   render,
 }: {
   title: string;
   color?: string;
   meta?: ReactNode;
+  dot?: string;
   rows: Row[];
   render: (r: Row) => ReactNode;
 }) {
   if (rows.length === 0) return null;
   return (
     <div>
-      <SectionHeader title={title} color={color} meta={meta ?? rows.length} />
+      <SectionHeader title={title} color={color} meta={meta ?? rows.length} dot={dot} />
       {rows.map(render)}
     </div>
   );

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
@@ -6,6 +6,8 @@ export interface BreakdownItem {
   name: string;
   amount: number;
   emoji?: string;
+  /** The entity's own color (group color or a shade of it), so it never changes with rank. */
+  color?: string;
   /** Categories inside a group (Groups view). A group with children can be opened. */
   children?: BreakdownItem[];
 }
@@ -19,13 +21,18 @@ const PALETTE = [
   "#84CC16", "#0F766E", "#9F1239", "#1E3A8A", "#78716C", "#B45309", "#7DD3FC", "#FDA4AF",
 ];
 
+/** An item's own color; the rank palette is only a fallback for uncolored data. */
+export const colorOf = (item: { color?: string }, index: number) => item.color ?? breakdownColor(index);
+
 export function breakdownColor(index: number): string {
   if (index < PALETTE.length) return PALETTE[index];
   const hue = Math.round((index * 137.508) % 360); // golden angle → well spread
   return `hsl(${hue} 55% 55%)`;
 }
 
-/** Pill tabs styled like the Settings tabs: the active one is black. */
+/** Segmented control: a light gray track with a white thumb that slides to
+ *  the active option. Quiet enough to sit next to the gray action buttons;
+ *  solid black stays reserved for primary actions. */
 export function PillTabs<T extends string>({
   tabs,
   value,
@@ -37,29 +44,44 @@ export function PillTabs<T extends string>({
   onChange: (value: T) => void;
   size?: "sm" | "md";
 }) {
+  const refs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [thumb, setThumb] = useState<{ left: number; width: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      const el = refs.current[value];
+      if (el) setThumb({ left: el.offsetLeft, width: el.offsetWidth });
+    };
+    measure();
+    // Re-measure once web fonts settle (label widths change).
+    document.fonts?.ready.then(measure).catch(() => {});
+  }, [value, tabs]);
+
+  const height = size === "sm" ? 32 : 36;
   return (
-    <div className="flex gap-1">
+    <div role="tablist" className="relative inline-flex items-center rounded-full bg-[#F3F4F6] p-1 flex-none">
+      {thumb && (
+        <span
+          aria-hidden
+          // Inline white instead of `bg-white`: the Budget page sizes every
+          // `.bg-white` inside its panels to 100% height.
+          className="absolute rounded-full shadow-[0_1px_2px_rgba(0,0,0,0.08),0_1px_6px_rgba(0,0,0,0.06)] transition-all duration-200 ease-out"
+          style={{ left: thumb.left, width: thumb.width, top: 4, height, backgroundColor: "#fff" }}
+        />
+      )}
       {tabs.map(([key, label]) => {
         const active = value === key;
         return (
           <button
             key={key}
+            ref={(el) => (refs.current[key] = el)}
+            role="tab"
+            aria-selected={active}
             onClick={() => onChange(key)}
-            className={`focus:outline-none focus-visible:ring-2 focus-visible:ring-black/20 ${active ? "" : "hover:bg-gray-100"}`}
-            style={{
-              height: size === "sm" ? 36 : 40,
-              padding: size === "sm" ? "0 14px" : "0 18px",
-              borderRadius: 30,
-              border: "none",
-              backgroundColor: active ? "#000" : "transparent",
-              color: active ? "#fff" : "#000",
-              fontFamily: "Inter",
-              fontSize: size === "sm" ? 13 : 14,
-              fontWeight: 500,
-              cursor: "pointer",
-              transition: "all 0.2s",
-              whiteSpace: "nowrap",
-            }}
+            className={`relative z-[1] rounded-full font-medium whitespace-nowrap transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-black/20 ${
+              active ? "text-black" : "text-gray-500 hover:text-black"
+            }`}
+            style={{ height, padding: size === "sm" ? "0 14px" : "0 16px", fontSize: 13, fontFamily: "Inter" }}
           >
             {label}
           </button>
@@ -138,7 +160,7 @@ export function CategoryBreakdown({ items, formatCurrency, flowLabel }: Props) {
       return (
         <Cell
           key={item.name}
-          fill={breakdownColor(index)}
+          fill={colorOf(item, index)}
           className={`cb-slice cb-slice-${index}`}
           style={style}
         />
@@ -272,7 +294,7 @@ export function CategoryBreakdown({ items, formatCurrency, flowLabel }: Props) {
                     </span>
                     <span
                       className="mt-1 text-xs font-semibold px-2 py-0.5 rounded-full text-white tabular-nums"
-                      style={{ backgroundColor: breakdownColor(active!) }}
+                      style={{ backgroundColor: colorOf(activeItem, active!) }}
                     >
                       {percentOf(activeItem.amount).toFixed(1)}%
                     </span>
@@ -322,7 +344,7 @@ export function CategoryBreakdown({ items, formatCurrency, flowLabel }: Props) {
               >
                 <span
                   className="w-1 self-stretch rounded-full flex-shrink-0 transition-all duration-200"
-                  style={{ backgroundColor: breakdownColor(index), opacity: isActive ? 1 : 0.85 }}
+                  style={{ backgroundColor: colorOf(item, index), opacity: isActive ? 1 : 0.85 }}
                 />
                 <span className="text-xl flex-shrink-0">{item.emoji || "💰"}</span>
                 <div className="flex-1 min-w-0">
@@ -335,7 +357,7 @@ export function CategoryBreakdown({ items, formatCurrency, flowLabel }: Props) {
                     <div className="mt-1 h-1 rounded-full bg-gray-100 overflow-hidden">
                       <div
                         className="h-full rounded-full transition-all duration-300"
-                        style={{ width: `${Math.max(percent, 1)}%`, backgroundColor: breakdownColor(index) }}
+                        style={{ width: `${Math.max(percent, 1)}%`, backgroundColor: colorOf(item, index) }}
                       />
                     </div>
                   )}

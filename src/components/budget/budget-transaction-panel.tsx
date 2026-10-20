@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { POSITIVE, NEGATIVE } from "@/lib/colors";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -281,83 +282,44 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
         className="bg-white overflow-hidden"
         style={{ flex: 1, aspectRatio: '525 / 632', display: 'flex', flexDirection: 'column', borderRadius: '20px' }}
       >
-        {/* Header */}
-        <div style={{ padding: '15px 20px', borderBottom: '1px solid #F3F4F6' }}>
-          <div className="hidden md:flex items-center justify-between mb-3">
-            <h2 style={{ fontFamily: 'Inter', fontSize: '24px', fontWeight: 500, color: '#000' }}>
+        {/* Header — same two-row grid as the Budget panel: title, tabs and
+            actions on one line; filters on the second. */}
+        <div style={{ padding: '16px 20px 14px', borderBottom: '1px solid #F3F4F6' }}>
+          <div className="flex items-center gap-x-4 gap-y-2 flex-wrap">
+            <h2 className="hidden md:block" style={{ fontFamily: 'Inter', fontSize: '22px', fontWeight: 500, color: '#000' }}>
               Transactions
             </h2>
-          </div>
-
-          <div className="flex items-center justify-between">
             <PillTabs
               tabs={[["list", "List"], ["calendar", "Calendar"]]}
               value={viewMode}
               onChange={setViewMode}
+              size="sm"
             />
-
-            <div className="flex items-center gap-2">
-            {/* Import Wise statement — same dialog as Settings → Data */}
-            <Button
-              onClick={() => setImportOpen(true)}
-              title="Import Wise statement"
-              aria-label="Import Wise statement"
-              style={{ height: '48px', minHeight: '48px', width: '48px', minWidth: '48px', padding: 0, borderRadius: '30px' }}
-              className="bg-[#F3F4F6] text-black hover:bg-black hover:text-white"
-            >
-              <FileUp className="w-5 h-5" />
-            </Button>
-
-            {/* Add Transaction Button */}
-            <>
-              <style>{`
-                .add-transaction-btn {
-                  width: 48px;
-                  padding: 0;
-                }
-                @media (min-width: 1300px) {
-                  .add-transaction-btn {
-                    width: 160px;
-                    padding-left: 18px;
-                    padding-right: 18px;
-                  }
-                }
-                .add-transaction-icon {
-                  display: block;
-                }
-                .add-transaction-text {
-                  display: none;
-                }
-                @media (min-width: 1300px) {
-                  .add-transaction-icon {
-                    display: none;
-                  }
-                  .add-transaction-text {
-                    display: inline;
-                  }
-                }
-              `}</style>
+            <div className="flex items-center gap-2 ml-auto">
+              {/* Import Wise statement — same dialog as Settings → Data */}
+              <Button
+                onClick={() => setImportOpen(true)}
+                title="Import Wise statement"
+                aria-label="Import Wise statement"
+                style={{ height: 40, width: 40, minWidth: 40, padding: 0, borderRadius: 30 }}
+                className="bg-[#F3F4F6] text-black hover:bg-black hover:text-white"
+              >
+                <FileUp className="w-[18px] h-[18px]" />
+              </Button>
               <Button
                 onClick={() => onAddTransaction()}
-                style={{
-                  height: '48px',
-                  minHeight: '48px',
-                  minWidth: '48px',
-                  fontFamily: 'Inter',
-                  fontSize: '14px',
-                  fontWeight: 500,
-                  borderRadius: '30px'
-                }}
-                className="bg-[#F3F4F6] text-black hover:bg-black hover:text-white add-transaction-btn"
+                title="Add transaction"
+                aria-label="Add transaction"
+                style={{ height: 40, width: 40, minWidth: 40, padding: 0, borderRadius: 30 }}
+                className="bg-[#F3F4F6] text-black hover:bg-black hover:text-white"
               >
-                <Plus className="w-5 h-5 add-transaction-icon" />
-                <span className="add-transaction-text">Add Transaction</span>
+                <Plus className="w-5 h-5" />
               </Button>
-            </>
             </div>
           </div>
 
-          <div className="mt-3">
+          <div className="mt-3 min-h-[58px] flex items-center">
+            <div className="w-full min-w-0">
             <TransactionFilters
               search={search}
               onSearch={setSearch}
@@ -367,6 +329,7 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
               onCategory={setCategoryFilter}
               categories={categories}
             />
+            </div>
           </div>
         </div>
 
@@ -438,12 +401,12 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
                         return (
                           <div style={{ display: 'inline-flex', gap: '10px', fontFamily: 'Inter', fontSize: '10px', fontWeight: 600 }}>
                             {income > 0 && (
-                              <span style={{ color: '#0F6E56' }}>
+                              <span style={{ color: POSITIVE }}>
                                 +{formatCurrency(income)}
                               </span>
                             )}
                             {expense > 0 && (
-                              <span style={{ color: '#991B1B' }}>
+                              <span style={{ color: NEGATIVE }}>
                                 −{formatCurrency(expense)}
                               </span>
                             )}

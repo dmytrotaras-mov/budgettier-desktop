@@ -55,7 +55,8 @@ export async function callBackend(
       if (method === "POST" && !a) return invoke("create_section", { input: body });
       if ((method === "PUT" || method === "PATCH") && a)
         return invoke("update_section", { id: a, input: body });
-      if (method === "DELETE" && a) return invoke("delete_section", { id: a });
+      // DELETE body: { moveTo?: sectionId } — where its categories go (none = ungrouped)
+      if (method === "DELETE" && a) return invoke("delete_section", { id: a, moveTo: (body as any)?.moveTo ?? null });
       break;
     }
 
@@ -87,7 +88,9 @@ export async function callBackend(
         return invoke("get_categories", { typeFilter: a });
       if (method === "POST" && !a) return invoke("create_category", { input: body });
       if (method === "PUT" && a) return invoke("update_category", { id: a, input: body });
-      if (method === "DELETE" && a) return invoke("delete_category", { id: a });
+      // DELETE body: { replacementId?: categoryId } — takes over its transactions, rules and limits
+      if (method === "DELETE" && a)
+        return invoke("delete_category", { id: a, replacementId: (body as any)?.replacementId ?? null });
       break;
     }
 

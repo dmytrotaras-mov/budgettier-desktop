@@ -3,10 +3,9 @@ import { Database, Settings2, Sparkles, Tags, Wallet } from "lucide-react";
 import ResponsiveContainer from "@/components/layout/responsive-container";
 import GeneralSection from "@/components/settings/general-section";
 import WalletsSection from "@/components/settings/wallets-section";
-import CategoryGroups from "@/components/settings/category-groups";
+import CategoryManager from "@/components/settings/categories/category-manager";
 import AutoCategorizationSection from "@/components/settings/auto-categorization";
 import DataSection from "@/components/settings/data-section";
-import { SettingsCard } from "@/components/settings/settings-ui";
 
 const TABS = [
   { id: "general", label: "General", icon: Settings2 },
@@ -32,7 +31,6 @@ function initialTab(): TabId {
 
 export default function SettingsPage() {
   const [activeTab, setActiveTabState] = useState<TabId>(initialTab);
-  const [categoryType, setCategoryType] = useState<"income" | "expense">("expense");
 
   const setActiveTab = (tab: TabId) => {
     setActiveTabState(tab);
@@ -81,41 +79,7 @@ export default function SettingsPage() {
         <div style={{ marginTop: 14 }}>
           {activeTab === "general" && <GeneralSection />}
           {activeTab === "wallets" && <WalletsSection />}
-          {activeTab === "categories" && (
-            <SettingsCard
-              title="Categories"
-              action={
-                <div className="flex">
-                  {(["expense", "income"] as const).map((type, i) => (
-                    <button
-                      key={type}
-                      onClick={() => setCategoryType(type)}
-                      style={{
-                        width: 100,
-                        height: 35,
-                        backgroundColor: categoryType === type ? "#F3F4F6" : "#fff",
-                        border: "1px solid #F3F4F6",
-                        borderLeft: i === 1 ? "none" : undefined,
-                        borderRadius: i === 0 ? "30px 0 0 30px" : "0 30px 30px 0",
-                        fontFamily: "Inter",
-                        fontSize: 12,
-                        fontWeight: 500,
-                        color: "#000",
-                        cursor: "pointer",
-                      }}
-                      className="hover:bg-gray-50"
-                    >
-                      {type === "expense" ? "Expense" : "Income"}
-                    </button>
-                  ))}
-                </div>
-              }
-            >
-              <div style={{ padding: "11px 0" }}>
-                <CategoryGroups type={categoryType} />
-              </div>
-            </SettingsCard>
-          )}
+          {activeTab === "categories" && <CategoryManager />}
           {activeTab === "rules" && <AutoCategorizationSection />}
           {activeTab === "data" && <DataSection />}
         </div>

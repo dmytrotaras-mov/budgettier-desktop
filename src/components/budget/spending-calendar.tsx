@@ -3,6 +3,7 @@
 // category, and each week ends with its total. Weeks start on Monday.
 
 import { useMemo } from "react";
+import { POSITIVE, NEGATIVE, withAlpha } from "@/lib/colors";
 import { eachDayOfInterval, endOfMonth, format, getDay, isAfter, isSameDay, isToday, startOfDay, startOfMonth } from "date-fns";
 import type { Category, Transaction } from "@shared/schema";
 
@@ -25,7 +26,7 @@ const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 /** Heat 0–1 → tile background. Square-root scale so one big bill (rent)
  *  doesn't wash out every other day. */
-const heatColor = (t: number) => `rgba(239, 68, 68, ${(0.06 + 0.3 * t).toFixed(3)})`;
+const heatColor = (t: number) => withAlpha(NEGATIVE, Number((0.06 + 0.3 * t).toFixed(3)));
 
 export function SpendingCalendar({ month, transactions, categories, formatCurrency, onDayClick }: Props) {
   const money = (n: number) => formatCurrency(Math.round(n)).replace(/\.00$/, "");
@@ -127,7 +128,7 @@ export function SpendingCalendar({ month, transactions, categories, formatCurren
                     </div>
                     <div className="mt-auto w-full leading-tight">
                       {s.income > 0 && (
-                        <div className="text-[10px] font-semibold text-emerald-600 tabular-nums">+{money(s.income)}</div>
+                        <div className="text-[10px] font-semibold tabular-nums" style={{ color: POSITIVE }}>+{money(s.income)}</div>
                       )}
                       {s.expense > 0 && (
                         <div className="text-[11px] font-semibold text-gray-900 tabular-nums">−{money(s.expense)}</div>

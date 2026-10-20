@@ -12,6 +12,8 @@
 //   - source-wallet dropdown (for transfers only)
 
 import { useEffect, useState } from "react";
+import { POSITIVE, NEGATIVE } from "@/lib/colors";
+import { ImportPickStep, ImportSteps } from "./import-pick-step";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -32,7 +34,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileUp, AlertCircle, AlertTriangle } from "lucide-react";
+import { FileUp, AlertCircle, AlertTriangle, ArrowRight } from "lucide-react";
 import type { Wallet, Category } from "@shared/schema";
 import { useSections, isHiddenCategory } from "@/lib/sectionUtils";
 
@@ -359,70 +361,30 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
   return (
     <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
       <DialogContent
-        className="md:!max-w-[1100px] md:!w-[92vw]"
+        className={stage === "preview" ? "md:!max-w-[1100px] md:!w-[92vw]" : "sm:!max-w-[480px] rounded-[20px]"}
         style={{ maxHeight: "90vh", display: "flex", flexDirection: "column" }}
+        onOpenAutoFocus={(e) => e.preventDefault()}
       >
-        <DialogHeader>
+        <DialogHeader className="gap-2">
           <DialogTitle>
-            {stage === "pick" && "Import from Wise CSV"}
+            {stage === "pick" && "Import from Wise"}
             {stage === "preview" && "Review transactions before import"}
             {stage === "done" && "Import complete"}
           </DialogTitle>
+          <ImportSteps current={stage === "pick" ? 0 : stage === "preview" ? 1 : 2} />
         </DialogHeader>
 
         {/* ============ Stage 1: pick ============ */}
         {stage === "pick" && (
-          <div style={{ padding: "16px 0", display: "flex", flexDirection: "column", gap: 16 }}>
-            <div>
-              <label style={{ fontSize: 13, fontWeight: 500, display: "block", marginBottom: 6 }}>
-                CSV file
-              </label>
-              <div style={{ display: "flex", gap: 8 }}>
-                <Button variant="outline" onClick={pickFile} disabled={busy}>
-                  <FileUp className="w-4 h-4 mr-2" />
-                  {filePath ? "Change file" : "Pick CSV file…"}
-                </Button>
-                {filePath && (
-                  <div
-                    style={{
-                      flex: 1,
-                      padding: "8px 12px",
-                      background: "#F3F4F6",
-                      borderRadius: 8,
-                      fontSize: 12,
-                      color: "#6B7280",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {filePath.split("/").pop()}
-                  </div>
-                )}
-              </div>
-            </div>
-            <div>
-              <label style={{ fontSize: 13, fontWeight: 500, display: "block", marginBottom: 6 }}>
-                Import into wallet
-              </label>
-              <Select value={targetWalletId} onValueChange={setTargetWalletId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Pick the Wise wallet" />
-                </SelectTrigger>
-                <SelectContent>
-                  {wallets.map((w: any) => (
-                    <SelectItem key={w.id} value={w.id}>
-                      {w.name} ({w.type})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p style={{ fontSize: 11, color: "#9CA3AF", marginTop: 6 }}>
-                Card transactions and direct debits land here. Internal Wise
-                "Moved from X" transfers will use the X wallet as source.
-              </p>
-            </div>
-          </div>
+          <ImportPickStep
+            filePath={filePath}
+            onPickFile={pickFile}
+            onDropFile={setFilePath}
+            wallets={wallets}
+            walletId={targetWalletId}
+            onWallet={setTargetWalletId}
+            busy={busy}
+          />
         )}
 
         {/* ============ Stage 2: preview ============ */}
@@ -586,7 +548,7 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
                     const typeIcon =
                       r.type === "income" ? "↑" : r.type === "expense" ? "↓" : "↔";
                     const typeColor =
-                      r.type === "income" ? "#0F6E56" : r.type === "expense" ? "#991B1B" : "#185FA5";
+                      r.type === "income" ? POSITIVE : r.type === "expense" ? NEGATIVE : "#185FA5";
                     // Pre-auth / duplicate rows render dimmed; their type icon greys out.
                     const dimIcon = !r.include;
                     return (
@@ -635,7 +597,7 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
                                               : "#F3F4F6",
                                     color:
                                       f === "duplicate"
-                                        ? "#991B1B"
+                                        ? NEGATIVE
                                         : f === "uncategorized"
                                           ? "#92400E"
                                           : f === "transfer"
@@ -659,7 +621,7 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
                             textAlign: "right",
                             fontWeight: 500,
                             whiteSpace: "nowrap",
-                            color: r.type === "income" ? "#0F6E56" : r.type === "expense" ? "#991B1B" : "#000",
+                            color: r.type === "income" ? POSITIVE : r.type === "expense" ? NEGATIVE : "#000",
                           }}
                         >
                           {r.type === "income" ? "+" : r.type === "expense" ? "−" : ""}
@@ -751,15 +713,28 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
           </div>
         )}
 
-        <DialogFooter style={{ marginTop: 16 }}>
+        <DialogFooter
+          className={stage === "pick" ? "gap-2 border-t border-gray-100 -mx-6 px-6 pt-4" : "gap-2"}
+          style={{ marginTop: stage === "pick" ? 20 : 16 }}
+        >
           {stage === "pick" && (
             <>
-              <Button variant="outline" onClick={handleClose}>
+              <button
+                type="button"
+                onClick={handleClose}
+                className="h-10 px-4 rounded-full text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-black transition-colors"
+              >
                 Cancel
-              </Button>
-              <Button onClick={loadPreview} disabled={busy || !filePath || !targetWalletId}>
-                {busy ? "Parsing…" : "Preview"}
-              </Button>
+              </button>
+              <button
+                type="button"
+                onClick={loadPreview}
+                disabled={busy || !filePath || !targetWalletId}
+                className="inline-flex items-center gap-1.5 h-10 pl-5 pr-4 rounded-full bg-black text-sm font-medium text-white hover:bg-gray-800 transition-colors disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
+              >
+                {busy ? "Reading…" : "Review transactions"}
+                {!busy && <ArrowRight size={16} />}
+              </button>
             </>
           )}
           {stage === "preview" && (
