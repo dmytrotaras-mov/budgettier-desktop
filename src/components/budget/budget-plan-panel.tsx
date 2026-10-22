@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -6,12 +6,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Target, Plus } from "lucide-react";
-import { format, getDaysInMonth, isSameMonth } from "date-fns";
+import { format, getDaysInMonth, isSameMonth, startOfMonth, subMonths } from "date-fns";
 import { invoke } from "@tauri-apps/api/core";
 import { PillTabs } from "@/components/overview/category-breakdown";
-import { BudgetStatusList, BudgetSummary, type BudgetItem, type BudgetView, type UnbudgetedItem } from "./budget-status-list";
+import { BudgetStatusList, BudgetSummary, type BudgetItem, type BudgetView, type MonthPlan } from "./budget-status-list";
+import { OutsideBudgetCard, type OutsideItem } from "./outside-budget-card";
+import { IncomeMenu, type IncomeMode } from "./income-menu";
+import { DialogShell, Field, textInput } from "@/components/settings/dialog-shell";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiCall, apiRequest } from "@/lib/queryClient";
 import { useCurrency } from "@/hooks/useCurrency";
 import type { Transaction, Category, BudgetCategoryAllocation } from "@shared/schema";
 import CategorySelector from "@/components/track/category-selector-redesigned";
@@ -39,6 +42,7 @@ interface MonthBudget {
   month: string;
   exists: boolean;
   copySource: string | null;
+  expectedIncome: string | null;
 }
 
 interface BudgetPlanPanelProps {
@@ -169,17 +173,128 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
     budget,
   }));
 
+  // ---- Flex budget: one allocation without a category covers every
+  //      category that has no limit of its own. ----
+  const flexAllocation = budgetAllocations.find((a) => !a.categoryId) ?? null;
+
+  // "Regular" income = categories in the built-in Primary Income group
+  // (Salary, Freelance, …), whatever it has been renamed to. Refunds, tax
+  // returns and gifts live in other groups and only count once they arrive.
+  const primarySectionName =
+    allSections.find((sec: any) => sec.id === "income_primary")?.name ?? "Primary Income";
+  const primaryIncomeIds = useMemo(
+    () => new Set(categories.filter((c) => c.type === "income" && c.section === primarySectionName).map((c) => c.id)),
+    [categories, primarySectionName],
+  );
+
+  // History for suggestions and income: the three full months before this one.
+  const { data: allTransactions = [] } = useQuery<any[]>({ queryKey: ["/api/transactions"] });
+  const history = useMemo(() => {
+    const monthStarts = [3, 2, 1].map((n) => startOfMonth(subMonths(selectedDate, n)));
+    const keyOf = (d: Date) => format(d, "yyyy-MM");
+    const keys = monthStarts.map(keyOf);
+    const spendByCat = new Map<string, number[]>();
+    const income = [0, 0, 0];
+    const primary = [0, 0, 0];
+    const active = [false, false, false];
+    for (const t of allTransactions) {
+      if (t.isOpening || t.excludeFromBudget) continue;
+      const i = keys.indexOf(keyOf(new Date(t.date)));
+      if (i < 0) continue;
+      active[i] = true;
+      const a = parseFloat(t.amount);
+      if (t.type === "income") {
+        income[i] += a;
+        if (primaryIncomeIds.has(t.categoryId)) primary[i] += a;
+      }
+      if (t.type === "expense" && t.categoryId) {
+        const row = spendByCat.get(t.categoryId) ?? [0, 0, 0];
+        row[i] += a;
+        spendByCat.set(t.categoryId, row);
+      }
+    }
+    const months = active.filter(Boolean).length;
+    return {
+      spendByCat,
+      avgPrimary: months ? primary.reduce((x, y) => x + y, 0) / months : 0,
+      lastMonthIncome: income[2],
+    };
+  }, [allTransactions, selectedDate, primaryIncomeIds]);
+
   // Spending this month in categories that have no limit.
-  const budgetedIds = new Set(budgetAllocations.map((a) => a.categoryId));
-  const unbudgeted: UnbudgetedItem[] = Object.values(
-    transactions.reduce<Record<string, UnbudgetedItem>>((acc, t: any) => {
+  const budgetedIds = new Set(budgetAllocations.map((a) => a.categoryId).filter(Boolean));
+  const roundUp = (n: number) => {
+    const step = n < 100 ? 5 : 10;
+    return Math.max(step, Math.ceil(n / step) * step);
+  };
+  const outsideItems: OutsideItem[] = Object.values(
+    transactions.reduce<Record<string, OutsideItem>>((acc, t: any) => {
       if (t.type !== "expense" || t.excludeFromBudget || t.isOpening || !t.categoryId || budgetedIds.has(t.categoryId)) return acc;
       const category = categories.find((c) => c.id === t.categoryId);
       if (!category || isHiddenCategory(category, allSections)) return acc;
-      (acc[t.categoryId] ??= { categoryId: t.categoryId, name: category.name.trim(), spent: 0 }).spent += parseFloat(t.amount);
+      const item = (acc[t.categoryId] ??= {
+        categoryId: t.categoryId,
+        name: category.name.trim(),
+        emoji: getCategoryEmoji(category),
+        color: sectionColor(allSections, resolveCategorySection(category), "expense"),
+        spent: 0,
+        transactions: [],
+        average: 0,
+        suggested: 0,
+        pattern: null,
+      });
+      item.spent += parseFloat(t.amount);
+      item.transactions.push(t);
       return acc;
     }, {}),
-  ).sort((a, b) => b.spent - a.spent);
+  )
+    .map((item) => {
+      const months = history.spendByCat.get(item.categoryId) ?? [0, 0, 0];
+      const average = months.reduce((x, y) => x + y, 0) / 3;
+      const withSpend = months.filter((m) => m > 0).length;
+      return {
+        ...item,
+        transactions: item.transactions.sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime()),
+        average,
+        suggested: roundUp(Math.max(average, item.spent)),
+        pattern: withSpend >= 2 ? ("every" as const) : withSpend === 0 ? ("oneoff" as const) : null,
+      };
+    })
+    .sort((a, b) => (a.pattern === "every" ? 0 : 1) - (b.pattern === "every" ? 0 : 1) || b.spent - a.spent);
+  const outsideTotal = outsideItems.reduce((s, i) => s + i.spent, 0);
+
+  // "Leave as is": hidden for the rest of this month, per device.
+  const dismissKey = `budgetLeftAsIs:${monthKey}`;
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    try {
+      setDismissed(new Set(JSON.parse(localStorage.getItem(dismissKey) || "[]")));
+    } catch {
+      setDismissed(new Set());
+    }
+  }, [dismissKey]);
+  const setDismissedFor = (categoryId: string, hide: boolean) => {
+    const next = new Set(dismissed);
+    if (hide) next.add(categoryId);
+    else next.delete(categoryId);
+    setDismissed(next);
+    try {
+      localStorage.setItem(dismissKey, JSON.stringify([...next]));
+    } catch {
+      // A convenience only.
+    }
+  };
+
+  // Insights' "outside the budget" link opens the review straight away.
+  const [openOutside] = useState(() => {
+    try {
+      const v = localStorage.getItem("openOutsideBudget") === "1";
+      localStorage.removeItem("openOutsideBudget");
+      return v;
+    } catch {
+      return false;
+    }
+  });
 
   // How far into the selected month we are: drives the "today" marker.
   const today = new Date();
@@ -188,6 +303,59 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
   const isPastMonth = !isThisMonth && selectedDate < today;
   const pace = isThisMonth ? today.getDate() / daysInMonth : isPastMonth ? 1 : null;
   const daysLeft = isThisMonth ? daysInMonth - today.getDate() + 1 : isPastMonth ? 0 : null;
+
+  // Income the month is planned around (see IncomeMenu).
+  const { data: settings } = useQuery<any>({ queryKey: ["/api/settings"] });
+  const incomeMode: IncomeMode = settings?.incomeMode ?? "regular";
+  const incomeTx = transactions.filter((t: any) => t.type === "income" && !t.isOpening && !t.excludeFromBudget);
+  const receivedIncome = incomeTx.reduce((sum: number, t: any) => sum + parseFloat(t.amount), 0);
+  const receivedPrimary = incomeTx.filter((t: any) => primaryIncomeIds.has(t.categoryId)).reduce((sum: number, t: any) => sum + parseFloat(t.amount), 0);
+  const incomeOptions = {
+    regular: Math.max(history.avgPrimary, receivedPrimary) + (receivedIncome - receivedPrimary),
+    last: history.lastMonthIncome,
+    received: receivedIncome,
+  };
+  const incomeOverride = budgetData?.expectedIncome ? parseFloat(budgetData.expectedIncome) : null;
+  const monthName = format(selectedDate, "MMMM");
+  const [plannedIncome, incomeLabel] =
+    incomeMode === "off"
+      ? [0, ""]
+      : isPastMonth
+        ? [receivedIncome, "income"]
+        : incomeOverride !== null
+          ? [incomeOverride, `set for ${monthName}`]
+          : incomeMode === "last"
+            ? [incomeOptions.last, "last month's income"]
+            : incomeMode === "received"
+              ? [incomeOptions.received, "received so far"]
+              : [incomeOptions.regular, "regular income"];
+  const monthPlan: MonthPlan = {
+    income: plannedIncome,
+    incomeLabel,
+    incomeOff: incomeMode === "off",
+    incomeProvisional: !isPastMonth && incomeOverride === null && incomeMode === "received",
+    flex: flexAllocation ? { limit: parseFloat(flexAllocation.allocatedAmount || "0"), spent: outsideTotal } : null,
+    outside: flexAllocation ? 0 : outsideTotal,
+    past: isPastMonth,
+  };
+  const setIncomeMode = async (mode: IncomeMode) => {
+    try {
+      await apiCall("PUT", "/api/settings", { incomeMode: mode });
+      if (incomeOverride !== null) await invoke("set_month_income", { month: monthKey, amount: null });
+      queryClient.invalidateQueries({ queryKey: ["/api/settings"] });
+      refreshBudget();
+    } catch (err: any) {
+      toast({ title: "Couldn't change income", description: String(err?.message || err), variant: "destructive" });
+    }
+  };
+  const setMonthIncome = async (amount: number | null) => {
+    try {
+      await invoke("set_month_income", { month: monthKey, amount: amount === null ? null : amount.toFixed(2) });
+      refreshBudget();
+    } catch (err: any) {
+      toast({ title: "Couldn't set income", description: String(err?.message || err), variant: "destructive" });
+    }
+  };
 
   // Calculate total budget and total spent
   const totalBudget = budgetAllocations.reduce((sum, allocation) =>
@@ -241,6 +409,74 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
       toast({ title: "Error", description: "Failed to remove budget category", variant: "destructive" });
     },
   });
+
+  const refreshAll = () => {
+    refreshBudget();
+    queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
+  };
+  const fail = (title: string) => (err: any) => toast({ title, description: String(err?.message || err), variant: "destructive" });
+  const addLimit = async (item: OutsideItem, amount: number) => {
+    try {
+      await apiCall("POST", "/api/budget-allocations", { budgetPlanId, categoryId: item.categoryId, allocatedAmount: amount.toFixed(2) });
+      refreshBudget();
+      toast({ title: `${item.name} added to the budget`, description: `Limit ${formatCurrency(amount)} a month` });
+    } catch (err) {
+      fail("Couldn't add the limit")(err);
+    }
+  };
+  const addAll = async (items: OutsideItem[]) => {
+    try {
+      for (const item of items)
+        await apiCall("POST", "/api/budget-allocations", { budgetPlanId, categoryId: item.categoryId, allocatedAmount: item.suggested.toFixed(2) });
+      refreshBudget();
+      toast({ title: `${items.length} categories added to the budget` });
+    } catch (err) {
+      fail("Couldn't add the limits")(err);
+    }
+  };
+  const moveTransaction = async (tx: any, categoryId: string) => {
+    try {
+      await apiCall("PUT", `/api/transactions/${tx.id}`, { categoryId });
+      refreshAll();
+      toast({ title: `Moved to ${categories.find((c) => c.id === categoryId)?.name.trim() ?? "category"}` });
+    } catch (err) {
+      fail("Couldn't move the transaction")(err);
+    }
+  };
+  const excludeTransaction = async (tx: any) => {
+    try {
+      await apiCall("PUT", `/api/transactions/${tx.id}`, { excludeFromBudget: true });
+      refreshAll();
+      toast({ title: "Excluded from the budget", description: "It stays in your history but no longer counts as spending." });
+    } catch (err) {
+      fail("Couldn't exclude the transaction")(err);
+    }
+  };
+  const [flexOpen, setFlexOpen] = useState(false);
+  // What the small categories without a limit usually cost per month. Big
+  // ones (€150+ a month) deserve their own limit, so they're left out.
+  const BIG_CATEGORY = 150;
+  const flexSuggestion = (() => {
+    let total = 0;
+    const big: string[] = [];
+    for (const [id, months] of history.spendByCat) {
+      if (budgetedIds.has(id)) continue;
+      const category = categories.find((c) => c.id === id);
+      if (!category || category.type !== "expense" || isHiddenCategory(category, allSections)) continue;
+      const avg = months.reduce((x, y) => x + y, 0) / 3;
+      if (avg >= BIG_CATEGORY) big.push(category.name.trim());
+      else total += avg;
+    }
+    return { amount: roundUp(total), big };
+  })();
+  const moveTargets = statusItems
+    .map((i) => budgetAllocations.find((a) => a.id === i.id)?.categoryId)
+    .filter(Boolean)
+    .map((id) => {
+      const c = categories.find((x) => x.id === id)!;
+      return { id: c.id, name: c.name.trim(), emoji: getCategoryEmoji(c) };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const handleOpenEditModal = () => {
     setEditingAllocationId(null);
@@ -317,7 +553,21 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
             <div className="mt-3 min-h-[58px]">
               <BudgetSummary
                 items={statusItems}
-                monthName={format(selectedDate, "MMMM")}
+                plan={monthPlan}
+                monthName={monthName}
+                incomeControl={(trigger) => (
+                  <IncomeMenu
+                    monthName={monthName}
+                    mode={incomeMode}
+                    override={incomeOverride}
+                    options={incomeOptions}
+                    money={(n) => formatCurrency(Math.round(n)).replace(/\.00$/, "")}
+                    onMode={setIncomeMode}
+                    onSetAmount={setMonthIncome}
+                  >
+                    {trigger}
+                  </IncomeMenu>
+                )}
                 pace={pace}
                 daysLeft={daysLeft}
                 formatCurrency={(n) => formatCurrency(n)}
@@ -378,7 +628,6 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
           ) : (
             <BudgetStatusList
               items={statusItems}
-              unbudgeted={unbudgeted}
               view={budgetView}
               sectionOrder={sectionRank}
               groupColor={(section) => sectionColor(allSections, section, "expense")}
@@ -388,16 +637,67 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
                 const allocation = budgetAllocations.find((a) => a.id === id);
                 if (allocation) handleEditAllocation(allocation);
               }}
-              onAddUnbudgeted={(u) => {
-                setEditingAllocationId(null);
-                setSelectedCategoryId(u.categoryId);
-                setBudgetAmount(String(Math.ceil(u.spent / 10) * 10));
-                setIsEditModalOpen(true);
-              }}
+              footer={
+                <OutsideBudgetCard
+                  items={outsideItems}
+                  flex={monthPlan.flex}
+                  dismissed={dismissed}
+                  moveTargets={moveTargets}
+                  money={(n) => formatCurrency(Math.round(n)).replace(/\.00$/, "")}
+                  defaultOpen={openOutside}
+                  onAddLimit={addLimit}
+                  onEditLimit={(item) => {
+                    setEditingAllocationId(null);
+                    setSelectedCategoryId(item.categoryId);
+                    setBudgetAmount(String(item.suggested));
+                    setIsEditModalOpen(true);
+                  }}
+                  onAddAll={addAll}
+                  onDismiss={setDismissedFor}
+                  onMove={moveTransaction}
+                  onExclude={excludeTransaction}
+                  onFlex={() => setFlexOpen(true)}
+                />
+              }
             />
           )}
         </div>
       </div>
+
+      {flexOpen && (
+        <FlexDialog
+          current={flexAllocation ? parseFloat(flexAllocation.allocatedAmount || "0") : null}
+          suggested={flexSuggestion.amount}
+          bigCategories={flexSuggestion.big}
+          money={(n) => formatCurrency(Math.round(n)).replace(/\.00$/, "")}
+          onClose={() => setFlexOpen(false)}
+          onSave={async (amount) => {
+            try {
+              if (flexAllocation) await apiCall("PUT", `/api/budget-allocations/${flexAllocation.id}`, { allocatedAmount: amount.toFixed(2) });
+              else await apiCall("POST", "/api/budget-allocations", { budgetPlanId, categoryId: null, allocatedAmount: amount.toFixed(2) });
+              refreshBudget();
+              setFlexOpen(false);
+              toast({ title: flexAllocation ? "Flex budget saved" : "Flex budget added", description: `${formatCurrency(amount)} a month for everything without its own limit` });
+            } catch (err) {
+              fail("Couldn't save the Flex budget")(err);
+            }
+          }}
+          onDelete={
+            flexAllocation
+              ? async () => {
+                  try {
+                    await apiCall("DELETE", `/api/budget-allocations/${flexAllocation.id}`);
+                    refreshBudget();
+                    setFlexOpen(false);
+                    toast({ title: "Flex budget removed" });
+                  } catch (err) {
+                    fail("Couldn't remove the Flex budget")(err);
+                  }
+                }
+              : undefined
+          }
+        />
+      )}
 
       {/* Edit Budget Modal */}
       <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
@@ -559,5 +859,59 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+/** One limit for everything that has no limit of its own. */
+function FlexDialog({
+  current,
+  suggested,
+  bigCategories,
+  money,
+  onClose,
+  onSave,
+  onDelete,
+}: {
+  current: number | null;
+  suggested: number;
+  bigCategories: string[];
+  money: (n: number) => string;
+  onClose: () => void;
+  onSave: (amount: number) => void;
+  onDelete?: () => void;
+}) {
+  const [value, setValue] = useState(String(current ?? suggested));
+  const amount = parseFloat(value.replace(",", "."));
+  const valid = !Number.isNaN(amount) && amount > 0;
+  return (
+    <DialogShell
+      title={current === null ? "Flex budget" : "Edit Flex budget"}
+      onClose={onClose}
+      onSave={() => valid && onSave(amount)}
+      saveLabel={current === null ? "Add Flex budget" : "Save"}
+      canSave={valid}
+      deleteSlot={
+        onDelete ? (
+          <button type="button" onClick={onDelete} className="h-9 px-4 rounded-full text-[13px] font-medium text-red-600 hover:bg-red-50">
+            Remove
+          </button>
+        ) : undefined
+      }
+    >
+      <p className="text-sm text-gray-600 -mt-1">
+        One limit for all the small and irregular spending — every category that doesn't have its own limit counts here. No need to keep thirty limits.
+      </p>
+      <Field label="How much a month?" hint={`You usually spend about ${money(suggested)} a month on the small things without a limit`}>
+        <div className="relative">
+          <input autoFocus inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} className={`${textInput} pl-8 text-[17px] tabular-nums`} />
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">€</span>
+        </div>
+      </Field>
+      {bigCategories.length > 0 && (
+        <p className="text-xs text-gray-500 rounded-xl bg-gray-50 px-3 py-2">
+          Not counted in the suggestion: <span className="font-medium text-gray-700">{bigCategories.join(", ")}</span> — big enough for a limit of {bigCategories.length === 1 ? "its" : "their"} own. Until then {bigCategories.length === 1 ? "it counts" : "they count"} in Flex too.
+        </p>
+      )}
+    </DialogShell>
   );
 }

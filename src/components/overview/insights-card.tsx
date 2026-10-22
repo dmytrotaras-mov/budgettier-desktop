@@ -3,6 +3,7 @@
 // when income usually lands, and savings so far this year.
 
 import { useMemo } from "react";
+import { useLocation } from "wouter";
 import { POSITIVE, NEGATIVE } from "@/lib/colors";
 import { endOfMonth, format, getDaysInMonth, isSameMonth, startOfMonth, subMonths } from "date-fns";
 import { AlertTriangle, CalendarClock, PiggyBank, Sparkles, TrendingDown, TrendingUp, Wallet } from "lucide-react";
@@ -16,6 +17,8 @@ interface Insight {
   icon: typeof Sparkles;
   title: string;
   detail: string;
+  /** Makes the row a link (e.g. to the Budget review). */
+  action?: () => void;
 }
 
 const TONE: Record<Tone, { bg: string; fg: string }> = {
@@ -45,6 +48,7 @@ const ordinal = (d: number) => {
 export function InsightsCard({ transactions, categories, selectedDate, viewMode, budget, formatCurrency, wallets = [] }: Props) {
   const money = (n: number) => formatCurrency(Math.round(n)).replace(/\.00$/, "");
   const { data: checks = [] } = useWalletChecks();
+  const [, navigate] = useLocation();
 
   const insights = useMemo(() => {
     const out: Insight[] = [];
@@ -107,17 +111,27 @@ export function InsightsCard({ transactions, categories, selectedDate, viewMode,
       if (budget?.exists && budget.allocations.length) {
         const spentBy = new Map<string, number>();
         for (const t of month) if (t.type === "expense" && t.categoryId) spentBy.set(t.categoryId, (spentBy.get(t.categoryId) ?? 0) + t.a);
-        const over = budget.allocations
-          .filter((a) => a.categoryId)
-          .map((a) => {
-            const limitFor = parseFloat(a.allocatedAmount);
-            return { id: a.categoryId!, over: (spentBy.get(a.categoryId!) ?? 0) - limitFor, limit: limitFor };
-          })
+        // Spending in categories without their own limit: covered by the
+        // Flex budget if there is one, otherwise "outside the budget".
+        const budgetedIds = new Set(budget.allocations.map((a) => a.categoryId).filter(Boolean));
+        const flex = budget.allocations.find((a) => !a.categoryId);
+        const isCountable = (id: string) => !budgetedIds.has(id) && categories.find((c) => c.id === id)?.section !== "System";
+        const outsideBy = [...spentBy].filter(([id]) => isCountable(id));
+        const outside = outsideBy.reduce((s, [, v]) => s + v, 0);
+        const over = [
+          ...budget.allocations
+            .filter((a) => a.categoryId)
+            .map((a) => {
+              const limitFor = parseFloat(a.allocatedAmount);
+              return { id: a.categoryId!, over: (spentBy.get(a.categoryId!) ?? 0) - limitFor, limit: limitFor };
+            }),
+          ...(flex ? [{ id: "__flex", over: outside - parseFloat(flex.allocatedAmount), limit: parseFloat(flex.allocatedAmount) }] : []),
+        ]
           // Same rule as the Budget panel: within 2% of the limit is "paid as planned".
           .filter((x) => x.over > Math.max(0.5, x.limit * 0.02))
           .sort((a, b) => b.over - a.over);
         const limit = budget.allocations.reduce((s, a) => s + parseFloat(a.allocatedAmount), 0);
-        const budgeted = budget.allocations.reduce((s, a) => s + (a.categoryId ? spentBy.get(a.categoryId) ?? 0 : 0), 0);
+        const budgeted = budget.allocations.reduce((s, a) => s + (a.categoryId ? spentBy.get(a.categoryId) ?? 0 : 0), 0) + (flex ? outside : 0);
         out.push(
           over.length
             ? {
@@ -125,7 +139,7 @@ export function InsightsCard({ transactions, categories, selectedDate, viewMode,
                 tone: "bad",
                 icon: AlertTriangle,
                 title: `${over.length} ${over.length === 1 ? "category is" : "categories are"} over budget`,
-                detail: over.slice(0, 2).map((o) => `${catName(o.id)} +${money(o.over)}`).join(" · "),
+                detail: over.slice(0, 2).map((o) => `${o.id === "__flex" ? "Flex" : catName(o.id)} +${money(o.over)}`).join(" · "),
               }
             : {
                 id: "budget",
@@ -135,6 +149,32 @@ export function InsightsCard({ transactions, categories, selectedDate, viewMode,
                 detail: `${money(Math.max(0, limit - budgeted))} of ${money(limit)} left`,
               },
         );
+        if (!flex && outside >= 1) {
+          // Categories that had spending in at least 2 of the 3 months before.
+          const regular = outsideBy
+            .filter(([id]) =>
+              [1, 2, 3].filter((n) => {
+                const m = subMonths(mStart, n);
+                return tx.some((t) => t.type === "expense" && t.categoryId === id && isSameMonth(t.d, m));
+              }).length >= 2,
+            )
+            .map(([id]) => catName(id));
+          out.push({
+            id: "outside",
+            tone: "warn",
+            icon: AlertTriangle,
+            title: `${money(outside)} spent outside the budget`,
+            detail: regular.length ? `${regular.slice(0, 2).join(", ")} ${regular.length === 1 ? "is" : "are"} every month — review` : "Review what to add to the budget",
+            action: () => {
+              try {
+                localStorage.setItem("openOutsideBudget", "1");
+              } catch {
+                // Opens collapsed instead.
+              }
+              navigate("/budget");
+            },
+          });
+        }
       }
 
       // 3. Biggest category change vs the same point last month.
@@ -263,8 +303,12 @@ export function InsightsCard({ transactions, categories, selectedDate, viewMode,
         {insights.length === 0 ? (
           <p className="text-sm text-gray-400 py-6 text-center">Not enough data yet — insights appear as you add transactions.</p>
         ) : (
-          insights.map(({ id, tone, icon: Icon, title, detail }) => (
-            <div key={id} className="flex items-center gap-3 py-2">
+          insights.map(({ id, tone, icon: Icon, title, detail, action }) => (
+            <div
+              key={id}
+              onClick={action}
+              className={`flex items-center gap-3 py-2 ${action ? "-mx-2 px-2 rounded-xl cursor-pointer hover:bg-gray-50 transition-colors" : ""}`}
+            >
               <span
                 className="w-9 h-9 rounded-[11px] flex items-center justify-center flex-shrink-0"
                 style={{ backgroundColor: TONE[tone].bg, color: TONE[tone].fg }}

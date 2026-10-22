@@ -353,6 +353,13 @@ const MIGRATIONS: &[&str] = &[
         );
         CREATE INDEX IF NOT EXISTS idx_wallet_checks_wallet ON wallet_checks(wallet_id, checked_at);
     "#,
+    // ---- v11: income the month is planned around ----
+    // settings.income_mode: regular | last | received | off. A month can set its
+    // own amount (budget_plans.expected_income); it isn't copied to new months.
+    r#"
+        ALTER TABLE settings ADD COLUMN income_mode TEXT NOT NULL DEFAULT 'regular';
+        ALTER TABLE budget_plans ADD COLUMN expected_income TEXT;
+    "#,
 ];
 
 /// Apply any migrations newer than the database's current `user_version`.

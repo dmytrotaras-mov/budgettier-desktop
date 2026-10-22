@@ -426,6 +426,15 @@ pub struct MonthBudget {
     /// Most recent earlier month that has a budget: what a new month copies.
     #[serde(rename = "copySource")]
     pub copy_source: Option<String>,
+    /// Income set by hand for this month (overrides the income mode).
+    #[serde(rename = "expectedIncome")]
+    pub expected_income: Option<String>,
+}
+
+fn expected_income_of(conn: &Connection, plan_id: &str) -> Option<String> {
+    conn.query_row("SELECT expected_income FROM budget_plans WHERE id = ?1", params![plan_id], |r| r.get(0))
+        .ok()
+        .flatten()
 }
 
 fn find_plan(conn: &Connection, month: &str) -> Option<BudgetPlan> {
@@ -513,6 +522,7 @@ pub(crate) fn month_budget(conn: &Connection, month: &str, create: bool) -> Resu
     };
     Ok(match plan {
         Some(p) => MonthBudget {
+            expected_income: expected_income_of(conn, &p.id),
             allocations: allocations_for(conn, &p.id)?,
             budget_plan_id: p.id,
             month: month.to_string(),
@@ -525,8 +535,23 @@ pub(crate) fn month_budget(conn: &Connection, month: &str, create: bool) -> Resu
             month: month.to_string(),
             exists: false,
             copy_source: source.and_then(|s| s.month),
+            expected_income: None,
         },
     })
+}
+
+/// Set (or clear, with None/"") the income a month is planned around.
+#[tauri::command]
+pub fn set_month_income(pool: State<DbPool>, month: String, amount: Option<String>) -> Result<MonthBudget, String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+    let budget = month_budget(&conn, &month, true)?;
+    let amount = match amount.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some(a) => Some(format!("{:.2}", a.replace(',', ".").parse::<f64>().map_err(|_| format!("not an amount: {a}"))?)),
+    };
+    conn.execute("UPDATE budget_plans SET expected_income = ?1 WHERE id = ?2", params![amount, budget.budget_plan_id])
+        .map_err(|e| e.to_string())?;
+    month_budget(&conn, &month, false)
 }
 
 fn current_month_str() -> String {
@@ -595,6 +620,22 @@ mod month_budget_tests {
     fn limit(conn: &Connection, month: &str) -> Option<String> {
         let b = month_budget(conn, month, false).unwrap();
         b.allocations.first().map(|a| a.allocated_amount.clone())
+    }
+
+    #[test]
+    fn flex_budget_without_a_category_is_copied_to_new_months() {
+        let conn = db();
+        let sep = month_budget(&conn, "2026-09", true).unwrap();
+        conn.execute(
+            "INSERT INTO budget_category_allocations (id, budget_plan_id, category_id, allocated_amount)
+             VALUES ('flex', ?1, NULL, '150')",
+            params![sep.budget_plan_id],
+        )
+        .unwrap();
+        let oct = month_budget(&conn, "2026-10", true).unwrap();
+        let flex: Vec<_> = oct.allocations.iter().filter(|a| a.category_id.is_none()).collect();
+        assert_eq!(flex.len(), 1);
+        assert_eq!(flex[0].allocated_amount, "150");
     }
 
     #[test]

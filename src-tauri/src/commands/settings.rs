@@ -24,6 +24,9 @@ pub struct Settings {
     pub weekly_summaries: bool,
     #[serde(rename = "defaultWalletId")]
     pub default_wallet_id: Option<String>,
+    /// How the Budget plans the month's income: regular | last | received | off.
+    #[serde(rename = "incomeMode")]
+    pub income_mode: String,
 }
 
 fn row_to_settings(row: &Row) -> rusqlite::Result<Settings> {
@@ -36,6 +39,7 @@ fn row_to_settings(row: &Row) -> rusqlite::Result<Settings> {
         monthly_reports: row.get::<_, i64>(5)? != 0,
         weekly_summaries: row.get::<_, i64>(6)? != 0,
         default_wallet_id: row.get(7)?,
+        income_mode: row.get(8)?,
     })
 }
 
@@ -61,7 +65,7 @@ pub fn get_settings(pool: State<DbPool>) -> Result<Settings, String> {
     let s = conn
         .query_row(
             "SELECT id, currency, budget_period, date_format, budget_limit_warnings,
-                    monthly_reports, weekly_summaries, default_wallet_id
+                    monthly_reports, weekly_summaries, default_wallet_id, income_mode
              FROM settings LIMIT 1",
             [],
             row_to_settings,
@@ -111,6 +115,13 @@ pub fn update_settings(pool: State<DbPool>, input: Value) -> Result<Settings, St
             "budgetLimitWarnings" => push_bool(&mut sets, &mut bind, "budget_limit_warnings", v),
             "monthlyReports" => push_bool(&mut sets, &mut bind, "monthly_reports", v),
             "weeklySummaries" => push_bool(&mut sets, &mut bind, "weekly_summaries", v),
+            "incomeMode" => {
+                let mode = v.as_str().unwrap_or("");
+                if !["regular", "last", "received", "off"].contains(&mode) {
+                    return Err(format!("unknown income mode: {mode}"));
+                }
+                push_text(&mut sets, &mut bind, "income_mode", v)
+            }
             "defaultWalletId" => {
                 if v.is_null() {
                     sets.push(format!("default_wallet_id = ?{}", bind.len() + 1));

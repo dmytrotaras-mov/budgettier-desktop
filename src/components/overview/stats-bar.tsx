@@ -9,8 +9,9 @@ import { PiggyBank, TrendingDown, TrendingUp, Wallet } from "lucide-react";
 import { useCurrency } from "@/hooks/useCurrency";
 import { calculateCumulativeBalance } from "@/lib/overviewCalculations";
 import { NEGATIVE, POSITIVE } from "@/lib/colors";
+import { Pointer } from "@/components/ui/pointer";
 
-/** "▲ 12% vs Sep" under a stat — colored by whether the direction is good. */
+/** "▲ 12% vs Sep" (a rounded pointer, not a glyph) under a stat — colored by whether the direction is good. */
 function Delta({
   current,
   previous,
@@ -39,7 +40,7 @@ function Delta({
   const text = absolute ? `${up ? "+" : "−"}${formatCurrency!(Math.abs(diff))}` : `${Math.round(Math.abs(diff / previous) * 100)}%`;
   return (
     <div className="text-[11px] font-medium h-4 flex items-center gap-1" style={{ color: good ? POSITIVE : NEGATIVE }}>
-      {!absolute && <span>{up ? "▲" : "▼"}</span>}
+      {!absolute && <Pointer w={8} color={good ? POSITIVE : NEGATIVE} up={up} />}
       <span className="tabular-nums">{text}</span>
       <span className="text-gray-400 font-normal">{sinceLabel ? `since ${label}` : `vs ${label}`}</span>
     </div>

@@ -25,6 +25,7 @@ pub fn run() {
             commands::wallets::create_wallet,
             commands::wallets::update_wallet,
             commands::wallets::delete_wallet,
+            commands::budgets::set_month_income,
             commands::wallet_checks::get_wallet_checks,
             commands::wallet_checks::record_wallet_check,
             commands::wallet_checks::adjust_wallet_balance,

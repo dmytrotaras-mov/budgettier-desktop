@@ -4,9 +4,10 @@
 // on a tile in the group's color, thin progress bar. The bar's color (and the
 // section a row sits in) is the status — never the tile.
 
-import { useState, type ReactNode } from "react";
+import { useState, type ReactElement, type ReactNode } from "react";
 import { POSITIVE, NEGATIVE } from "@/lib/colors";
-import { ChevronDown, Check, Plus } from "lucide-react";
+import { ChevronDown, Check } from "lucide-react";
+import { Pointer } from "@/components/ui/pointer";
 import { EntityIcon } from "@/components/ui/entity-icon";
 
 export type BudgetView = "status" | "groups";
@@ -18,12 +19,6 @@ export interface BudgetItem {
   section: string;
   spent: number;
   budget: number;
-}
-
-export interface UnbudgetedItem {
-  categoryId: string;
-  name: string;
-  spent: number;
 }
 
 type Status = "over" | "near" | "ok" | "paid" | "unused";
@@ -49,7 +44,6 @@ function statusOf({ spent, budget }: BudgetItem): Status {
 
 interface Props {
   items: BudgetItem[];
-  unbudgeted: UnbudgetedItem[];
   view: BudgetView;
   sectionOrder: (section: string) => number;
   /** A group's color: tints each row's icon, and the dot in the Groups view. */
@@ -58,21 +52,20 @@ interface Props {
   pace: number | null;
   formatCurrency: (amount: number) => string;
   onEdit: (id: string) => void;
-  onAddUnbudgeted: (item: UnbudgetedItem) => void;
+  /** Rendered under the list: spending outside the budget / Flex. */
+  footer?: ReactNode;
 }
 
 export function BudgetStatusList({
   items,
-  unbudgeted,
   view,
   sectionOrder,
   groupColor,
   pace,
   formatCurrency,
   onEdit,
-  onAddUnbudgeted,
+  footer,
 }: Props) {
-  const unbudgetedTotal = unbudgeted.reduce((s, u) => s + u.spent, 0);
   const money = (n: number) => formatCurrency(Math.round(n)).replace(/\.00$/, "");
 
   const withStatus = items.map((item) => ({ item, status: statusOf(item) }));
@@ -127,54 +120,76 @@ export function BudgetStatusList({
           })
       )}
 
-      {unbudgeted.length > 0 && (
-        <div className="mt-4 flex items-center gap-3 rounded-2xl bg-gray-50 p-3 pl-4">
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium text-gray-900">
-              {money(unbudgetedTotal)} spent outside the budget
-            </div>
-            <div className="text-xs text-gray-500 truncate">{unbudgeted.map((u) => u.name).join(" · ")}</div>
-          </div>
-          <button
-            onClick={() => onAddUnbudgeted(unbudgeted[0])}
-            className="inline-flex flex-none items-center gap-1.5 whitespace-nowrap rounded-full bg-black pl-3 pr-4 text-[13px] font-medium text-white transition-colors hover:bg-gray-800"
-            style={{ height: 36 }}
-          >
-            <Plus size={15} />
-            Add to budget
-          </button>
-        </div>
-      )}
+      {footer}
     </div>
   );
 }
 
-/** "Left to spend" header — pinned above the scrolling list in the panel. */
+/** Where the month's money goes, for the summary bar. */
+export interface MonthPlan {
+  /** Income the month is planned around (see IncomeMenu), and where it comes from. */
+  income: number;
+  /** e.g. "regular income", "last month's income", "set for October". */
+  incomeLabel: string;
+  /** The user turned the savings part off. */
+  incomeOff: boolean;
+  /** Income still arriving (counting only what came in so far): a shortfall
+   *  means "more needs to come in", not "you spend more than you earn". */
+  incomeProvisional: boolean;
+  /** Flex budget: its limit and what categories without their own limit spent. */
+  flex: { limit: number; spent: number } | null;
+  /** Spending outside the budget (only when there's no Flex budget). */
+  outside: number;
+  /** A finished month: the plan is what actually happened. */
+  past: boolean;
+}
+
+/**
+ * The pinned month header: money left to spend, and one bar for the whole
+ * month — income split into spent / still to spend by the budget / what you
+ * save if the rest of the month goes to plan.
+ */
 export function BudgetSummary({
   items,
+  plan,
   monthName,
   pace,
   daysLeft,
   formatCurrency,
+  incomeControl,
 }: {
   items: BudgetItem[];
+  plan: MonthPlan;
+  /** Wraps the income caption in the menu that changes it. */
+  incomeControl?: (trigger: ReactElement) => ReactNode;
   monthName: string;
   pace: number | null;
   daysLeft: number | null;
   formatCurrency: (amount: number) => string;
 }) {
   const money = (n: number) => formatCurrency(Math.round(n)).replace(/\.00$/, "");
-  const totalBudget = items.reduce((s, i) => s + i.budget, 0);
-  const totalSpent = items.reduce((s, i) => s + i.spent, 0);
+  const flexLimit = plan.flex?.limit ?? 0;
+  const flexSpent = plan.flex?.spent ?? 0;
+  const totalBudget = items.reduce((s, i) => s + i.budget, 0) + flexLimit;
+  const totalSpent = items.reduce((s, i) => s + i.spent, 0) + flexSpent;
   const left = totalBudget - totalSpent;
-  const spentShare = totalBudget > 0 ? totalSpent / totalBudget : 0;
   const perDay = daysLeft && daysLeft > 0 && left > 0 ? left / daysLeft : null;
+
+  // The rest of the month "to plan": every limit gets used (or stays
+  // overspent), Flex likewise, and spending outside the budget stays as is.
+  const spentNow = totalSpent + plan.outside;
+  const plannedOut = plan.past
+    ? spentNow
+    : items.reduce((s, i) => s + Math.max(i.spent, i.budget), 0) + Math.max(flexSpent, flexLimit) + plan.outside;
+  const save = plan.income - plannedOut;
+  const hasIncome = !plan.incomeOff && plan.income > 0;
+  const control = incomeControl ?? ((t: ReactElement) => t);
+  const scale = Math.max(hasIncome ? plan.income : 0, plannedOut, 1);
+  const pct = (n: number) => `${(Math.max(n, 0) / scale) * 100}%`;
+  const over = spentNow > plannedOut - 0.005 && !plan.past && left < 0;
+
   return (
-    <div
-      className="min-w-0"
-      style={{ contain: "inline-size" }}
-      title={`${monthName}: spent ${money(totalSpent)} of ${money(totalBudget)}`}
-    >
+    <div className="min-w-0" style={{ contain: "inline-size" }} title={`${monthName}: spent ${money(totalSpent)} of ${money(totalBudget)}`}>
       <div className="flex items-baseline justify-between gap-3">
         <div className="flex items-baseline gap-1.5 min-w-0">
           <span className="text-[22px] leading-none font-semibold tabular-nums" style={{ color: left >= 0 ? "#000" : STATUS_COLOR.over }}>
@@ -190,10 +205,82 @@ export function BudgetSummary({
           </span>
         )}
       </div>
-      <ProgressBar share={spentShare} pace={pace} color={spentShare > 1 ? STATUS_COLOR.over : "#000"} height={6} className="mt-2.5" />
-      <div className="flex justify-between text-[11px] text-gray-400 mt-1 tabular-nums">
-        <span>Spent {money(totalSpent)} · {Math.round(spentShare * 100)}%</span>
-        {pace !== null && <span>{Math.round(pace * 100)}% of the month gone</span>}
+
+      {hasIncome ? (
+        <>
+          <div className="relative mt-2.5 flex h-2 gap-[2px]" aria-label="Month plan">
+            <div className="h-full rounded-l-full" style={{ width: pct(spentNow), backgroundColor: over ? STATUS_COLOR.over : "#111827" }} />
+            {plannedOut - spentNow > 0.5 && <div className="h-full" style={{ width: pct(plannedOut - spentNow), backgroundColor: "#D1D5DB" }} />}
+            {save > 0.5 && <div className="h-full rounded-r-full" style={{ width: pct(save), backgroundColor: POSITIVE }} />}
+            {save < -0.5 && (
+              <div
+                className="absolute rounded-full"
+                style={{ left: pct(plan.income), top: -3, bottom: -3, width: 2, backgroundColor: plan.incomeProvisional ? "#B45309" : STATUS_COLOR.over }}
+                title="Your income"
+              />
+            )}
+            {pace !== null && pace > 0 && pace < 1 && <TodayMarker left={pct(pace * plannedOut)} pace={pace} monthName={monthName} color="#111827" pointer />}
+          </div>
+          <div className="mt-1.5 flex items-center gap-x-3 gap-y-0.5 flex-wrap text-[11px] tabular-nums">
+            <span className="inline-flex items-center gap-1 text-gray-500">
+              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: over ? STATUS_COLOR.over : "#111827" }} />
+              Spent {money(spentNow)}
+            </span>
+            {!plan.past && plannedOut - spentNow > 0.5 && (
+              <span className="inline-flex items-center gap-1 text-gray-500">
+                <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: "#D1D5DB" }} />
+                To spend {money(plannedOut - spentNow)}
+              </span>
+            )}
+            {(() => {
+              const color = save >= 0 ? POSITIVE : plan.incomeProvisional ? "#B45309" : STATUS_COLOR.over;
+              return (
+                <span className="inline-flex items-center gap-1 font-medium" style={{ color }}>
+                  <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
+                  {save >= 0
+                    ? `${plan.past ? "Saved" : "Save"} ${money(save)}`
+                    : plan.incomeProvisional
+                      ? `Needs ${money(-save)} more income`
+                      : `${money(-save)} more than you earn`}
+                </span>
+              );
+            })()}
+            {control(
+              <button type="button" className="ml-auto rounded-full px-1.5 -mr-1.5 text-gray-400 underline decoration-dotted underline-offset-2 hover:bg-gray-100 hover:text-black" title="Change how income is planned">
+                of {money(plan.income)} {plan.incomeLabel}
+              </button>,
+            )}
+          </div>
+        </>
+      ) : (
+        <>
+          <ProgressBar share={totalBudget > 0 ? totalSpent / totalBudget : 0} pace={pace} color={left < 0 ? STATUS_COLOR.over : "#000"} height={6} className="mt-2.5" />
+          <div className="flex justify-between text-[11px] text-gray-400 mt-1 tabular-nums">
+            <span>Spent {money(totalSpent)} · {totalBudget > 0 ? Math.round((totalSpent / totalBudget) * 100) : 0}%</span>
+            {control(
+              <button type="button" className="rounded-full px-1.5 -mr-1.5 underline decoration-dotted underline-offset-2 hover:bg-gray-100 hover:text-black">
+                {plan.incomeOff ? "Show savings" : "Set income to see savings"}
+              </button>,
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * "Today" on a bar: a small pointer above it, never crossing the bar. The
+ * month bar's pointer is ink; a category row's takes the row's status colour,
+ * so the pointers line up into one quiet "today" column down the list.
+ */
+function TodayMarker({ left, pace, monthName, color, pointer }: { left: string; pace: number; monthName?: string; color: string; pointer?: boolean }) {
+  const label = `Today · ${Math.round(pace * 100)}% of ${monthName ?? "the month"} gone`;
+  const w = pointer ? 9 : 7;
+  return (
+    <div className="absolute" style={{ left, top: 0, bottom: 0, width: 0 }} title={label} aria-label={label}>
+      <div className="absolute flex" style={{ left: -w / 2, top: pointer ? -8 : -6 }}>
+        <Pointer w={w} color={color} />
       </div>
     </div>
   );
@@ -203,12 +290,15 @@ function ProgressBar({
   share,
   pace,
   color,
+  markerColor,
   height = 4,
   className = "",
 }: {
   share: number;
   pace: number | null;
   color: string;
+  /** Today pointer colour; defaults to the bar colour. */
+  markerColor?: string;
   height?: number;
   className?: string;
 }) {
@@ -218,13 +308,7 @@ function ProgressBar({
         className="absolute inset-y-0 left-0 rounded-full transition-all duration-300"
         style={{ width: `${Math.min(Math.max(share, 0), 1) * 100}%`, backgroundColor: color }}
       />
-      {pace !== null && pace > 0 && pace < 1 && (
-        <div
-          className="absolute rounded-full bg-gray-400"
-          style={{ left: `${pace * 100}%`, top: -3, bottom: -3, width: 1.5 }}
-          title="Today"
-        />
-      )}
+      {pace !== null && pace > 0 && pace < 1 && <TodayMarker left={`${pace * 100}%`} pace={pace} color={markerColor ?? color} />}
     </div>
   );
 }
@@ -265,7 +349,13 @@ function BudgetRow({
           <span className="text-sm font-medium text-gray-900 truncate">{item.name}</span>
           <span className="text-sm font-semibold tabular-nums flex-shrink-0">{right}</span>
         </div>
-        <ProgressBar share={share} pace={pace} color={STATUS_COLOR[status]} className="mt-1.5" />
+        <ProgressBar
+          share={share}
+          pace={pace}
+          color={STATUS_COLOR[status]}
+          markerColor={status === "unused" ? "#D1D5DB" : STATUS_COLOR[status]}
+          className="mt-1.5"
+        />
         <div className="text-[11px] text-gray-500 mt-1 tabular-nums">
           {money(item.spent)} of {money(item.budget)}
         </div>
