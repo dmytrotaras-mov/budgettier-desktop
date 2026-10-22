@@ -1,11 +1,13 @@
 // Budget panel: a pinned "left to spend" summary with the month's pace, and each
 // budgeted category as a compact row, either grouped by status (what needs
-// attention first) or by section. Shares the visual language of the Overview
-// category breakdown: color stripe, emoji, thin progress bar.
+// attention first) or by section. Rows share the app's category look: emoji
+// on a tile in the group's color, thin progress bar. The bar's color (and the
+// section a row sits in) is the status — never the tile.
 
 import { useState, type ReactNode } from "react";
 import { POSITIVE, NEGATIVE } from "@/lib/colors";
 import { ChevronDown, Check, Plus } from "lucide-react";
+import { EntityIcon } from "@/components/ui/entity-icon";
 
 export type BudgetView = "status" | "groups";
 
@@ -50,7 +52,7 @@ interface Props {
   unbudgeted: UnbudgetedItem[];
   view: BudgetView;
   sectionOrder: (section: string) => number;
-  /** A group's color, shown as a dot in the Groups view. */
+  /** A group's color: tints each row's icon, and the dot in the Groups view. */
   groupColor?: (section: string) => string;
   /** Share of the month already gone (0–1), or null for a future month. */
   pace: number | null;
@@ -80,7 +82,7 @@ export function BudgetStatusList({
       .sort((a, b) => b.item.spent / (b.item.budget || 1) - a.item.spent / (a.item.budget || 1));
 
   const row = ({ item, status }: { item: BudgetItem; status: Status }) => (
-    <BudgetRow key={item.id} item={item} status={status} pace={pace} money={money} onClick={() => onEdit(item.id)} />
+    <BudgetRow key={item.id} item={item} status={status} color={groupColor?.(item.section)} pace={pace} money={money} onClick={() => onEdit(item.id)} />
   );
 
   return (
@@ -230,12 +232,14 @@ function ProgressBar({
 function BudgetRow({
   item,
   status,
+  color,
   pace,
   money,
   onClick,
 }: {
   item: BudgetItem;
   status: Status;
+  color?: string;
   pace: number | null;
   money: (n: number) => string;
   onClick: () => void;
@@ -255,8 +259,7 @@ function BudgetRow({
       onClick={onClick}
       className="flex items-center gap-3 px-2 py-2 -mx-2 rounded-xl hover:bg-gray-50 cursor-pointer transition-colors"
     >
-      <span className="w-1 self-stretch rounded-full flex-shrink-0" style={{ backgroundColor: STATUS_COLOR[status] }} />
-      <span className="text-xl flex-shrink-0">{item.emoji}</span>
+      <EntityIcon emoji={item.emoji} color={color} />
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline justify-between gap-2">
           <span className="text-sm font-medium text-gray-900 truncate">{item.name}</span>

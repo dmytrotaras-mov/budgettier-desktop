@@ -29,6 +29,8 @@ export const wallets = sqliteTable("wallets", {
   name: text("name").notNull(),
   type: text("type").notNull(), // 'cash' | 'bank' | 'credit'
   balance: text("balance").notNull().default("0"),
+  color: text("color"), // null = the wallet type's default
+  emoji: text("emoji"), // null = the wallet type's icon
 });
 
 export const transactions = sqliteTable(

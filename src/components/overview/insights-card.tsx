@@ -235,7 +235,7 @@ export function InsightsCard({ transactions, categories, selectedDate, viewMode,
           insights.map(({ id, tone, icon: Icon, title, detail }) => (
             <div key={id} className="flex items-center gap-3 py-2">
               <span
-                className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
+                className="w-9 h-9 rounded-[11px] flex items-center justify-center flex-shrink-0"
                 style={{ backgroundColor: TONE[tone].bg, color: TONE[tone].fg }}
               >
                 <Icon size={17} />

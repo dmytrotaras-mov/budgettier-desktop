@@ -5,17 +5,8 @@ import { useMemo } from "react";
 import { POSITIVE, NEGATIVE } from "@/lib/colors";
 import { useLocation } from "wouter";
 import { endOfMonth, format, startOfMonth } from "date-fns";
-import { Banknote, Building2, ChartLine, CreditCard, PiggyBank } from "lucide-react";
 import { OverviewCard } from "./overview-card";
-
-const TYPES: Record<string, { label: string; icon: typeof Banknote; color: string }> = {
-  bank: { label: "Bank", icon: Building2, color: "#3B82F6" },
-  savings: { label: "Savings", icon: PiggyBank, color: POSITIVE },
-  investment: { label: "Investments", icon: ChartLine, color: "#8B5CF6" },
-  cash: { label: "Cash", icon: Banknote, color: "#F59E0B" },
-  credit: { label: "Credit card", icon: CreditCard, color: "#6B7280" },
-};
-const typeOf = (t: string) => TYPES[t] ?? TYPES.cash;
+import { WalletIcon, walletColor, walletType } from "@/lib/walletUtils";
 
 interface Props {
   wallets: any[];
@@ -87,7 +78,7 @@ export function WalletsCard({ wallets, transactions, selectedDate, viewMode, for
             {positive.map((w) => (
               <div
                 key={w.id}
-                style={{ width: `${(w.balance / positiveTotal) * 100}%`, backgroundColor: typeOf(w.type).color }}
+                style={{ width: `${(w.balance / positiveTotal) * 100}%`, backgroundColor: walletColor(w) }}
                 title={`${w.name}: ${money(w.balance)}`}
               />
             ))}
@@ -95,14 +86,11 @@ export function WalletsCard({ wallets, transactions, selectedDate, viewMode, for
         )}
         <div className="flex flex-col">
           {rows.map((w) => {
-            const t = typeOf(w.type);
-            const Icon = t.icon;
+            const t = walletType(w.type);
             const share = positiveTotal > 0 && w.balance > 0 ? Math.round((w.balance / positiveTotal) * 100) : null;
             return (
               <div key={w.id} className="flex items-center gap-3 py-2 border-b border-gray-100 last:border-b-0">
-                <span className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${t.color}1A`, color: t.color }}>
-                  <Icon size={15} />
-                </span>
+                <WalletIcon wallet={w} />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-gray-900 truncate">{w.name}</div>
                   <div className="text-[11px] text-gray-500 truncate">

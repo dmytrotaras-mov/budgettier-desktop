@@ -17,6 +17,7 @@ import { WalletsCard } from "@/components/overview/wallets-card";
 import { StatsBar } from "@/components/overview/stats-bar";
 import { CashFlowChart, CASH_FLOW_SERIES, type CashFlowMode } from "@/components/overview/cash-flow-chart";
 import { SpendingPaceChart } from "@/components/overview/spending-pace-chart";
+import { EntityIcon } from "@/components/ui/entity-icon";
 import { invoke } from "@tauri-apps/api/core";
 import {
   calculateYearOverview,
@@ -626,7 +627,7 @@ export default function OverviewRedesignedPage() {
 
             {/* 3. Categories */}
             <OverviewCard
-              title={categoryFlowMode === "expense" ? "Spending by category" : "Income by category"}
+              title={categoryFlowMode === "expense" ? "Spending" : "Income"}
               subtitle={`${formatCurrency(categoryFlowMode === "expense" ? totalExpenses : totalIncome)} · ${displayCategoryData.length} ${
                 categoryViewMode === "groups" ? (displayCategoryData.length === 1 ? "group" : "groups") : displayCategoryData.length === 1 ? "category" : "categories"
               }`}
@@ -645,7 +646,14 @@ export default function OverviewRedesignedPage() {
               <div className="px-5 pb-2">
                 <BreakdownTabs mode={categoryViewMode} onChange={setCategoryViewMode} size="sm" />
               </div>
-              <div className="flex-1 overflow-y-auto px-5 pb-4">
+              <div
+                className="flex-1 overflow-y-auto px-5 pb-4"
+                style={{
+                  // The card has a fixed height; fade the last row instead of cutting it.
+                  WebkitMaskImage: "linear-gradient(to bottom, #000 calc(100% - 28px), transparent)",
+                  maskImage: "linear-gradient(to bottom, #000 calc(100% - 28px), transparent)",
+                }}
+              >
                 <div className="flex flex-col gap-1">
                   {displayCategoryData.length === 0 ? (
                     <p className="text-sm text-gray-400 text-center py-6">No {categoryFlowMode} transactions in this period.</p>
@@ -655,8 +663,7 @@ export default function OverviewRedesignedPage() {
                       const percent = totalForPercent > 0 ? (category.amount / totalForPercent) * 100 : 0;
                       return (
                         <div key={category.name} className="flex items-center gap-3 px-2 py-2 -mx-2 rounded-xl hover:bg-gray-50 transition-colors">
-                          <span className="w-1 self-stretch rounded-full flex-shrink-0" style={{ backgroundColor: colorOf(category, index) }} />
-                          <span className="text-xl flex-shrink-0">{category.emoji}</span>
+                          <EntityIcon emoji={category.emoji} color={colorOf(category, index)} />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-baseline justify-between gap-2">
                               <span className="text-sm font-medium text-gray-900 truncate">{category.name}</span>

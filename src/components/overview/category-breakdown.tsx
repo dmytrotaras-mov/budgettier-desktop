@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { EntityIcon } from "@/components/ui/entity-icon";
 
 export interface BreakdownItem {
   name: string;
@@ -342,11 +343,7 @@ export function CategoryBreakdown({ items, formatCurrency, flowLabel }: Props) {
                   isActive ? "bg-gray-50" : ""
                 } ${dimmed ? "opacity-50" : "opacity-100"} ${openable ? "cursor-pointer" : "cursor-default"}`}
               >
-                <span
-                  className="w-1 self-stretch rounded-full flex-shrink-0 transition-all duration-200"
-                  style={{ backgroundColor: colorOf(item, index), opacity: isActive ? 1 : 0.85 }}
-                />
-                <span className="text-xl flex-shrink-0">{item.emoji || "💰"}</span>
+                <EntityIcon emoji={item.emoji || "💰"} color={colorOf(item, index)} />
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-gray-900 text-sm truncate">{item.name}</div>
                   {openable ? (

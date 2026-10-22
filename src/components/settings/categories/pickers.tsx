@@ -5,19 +5,39 @@
 // ColorPicker: sixteen swatches (the first eight are the validated palette)
 // and a custom color.
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, Search } from "lucide-react";
-import { EMOJI_GROUPS, firstGrapheme } from "@/lib/emoji-catalog";
+import { EMOJI_GROUPS, firstGrapheme, type EmojiGroup } from "@/lib/emoji-catalog";
 import { GROUP_PALETTE, GROUP_EXTRA_COLORS } from "@/lib/sectionUtils";
 
-export function EmojiPicker({ value, onChange, tint }: { value: string; onChange: (emoji: string) => void; tint?: string }) {
+export function EmojiPicker({
+  value,
+  onChange,
+  tint,
+  placeholder = "📂",
+  extraGroups = [],
+  onReset,
+  resetLabel = "Default",
+}: {
+  value: string;
+  onChange: (emoji: string) => void;
+  tint?: string;
+  /** Shown in the preview tile when no emoji is chosen. */
+  placeholder?: ReactNode;
+  /** Groups shown before the standard catalog (e.g. money emojis for wallets). */
+  extraGroups?: EmojiGroup[];
+  /** Offers a way back to "no emoji" (e.g. the wallet type's icon). */
+  onReset?: () => void;
+  resetLabel?: string;
+}) {
   const [query, setQuery] = useState("");
   const anyRef = useRef<HTMLInputElement>(null);
 
   const groups = useMemo(() => {
+    const all = [...extraGroups, ...EMOJI_GROUPS];
     const q = query.trim().toLowerCase();
-    if (!q) return EMOJI_GROUPS;
-    return EMOJI_GROUPS.map((g) => ({ ...g, items: g.items.filter(([e, k]) => k.includes(q) || e === q) })).filter((g) => g.items.length);
+    if (!q) return all;
+    return all.map((g) => ({ ...g, items: g.items.filter(([e, k]) => k.includes(q) || e === q) })).filter((g) => g.items.length);
   }, [query]);
 
   return (
@@ -27,7 +47,7 @@ export function EmojiPicker({ value, onChange, tint }: { value: string; onChange
           className="w-11 h-11 rounded-xl flex items-center justify-center text-2xl flex-shrink-0"
           style={{ backgroundColor: tint ?? "#F3F4F6" }}
         >
-          {value || "📂"}
+          {value || placeholder}
         </span>
         <div className="relative flex-1">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
@@ -38,6 +58,15 @@ export function EmojiPicker({ value, onChange, tint }: { value: string; onChange
             className="w-full h-9 rounded-full bg-gray-100 pl-8 pr-3 text-[13px] outline-none focus:bg-white focus:ring-2 focus:ring-black/10"
           />
         </div>
+        {onReset && value && (
+          <button
+            type="button"
+            onClick={onReset}
+            className="h-9 px-3 rounded-full text-[12px] font-medium text-gray-600 hover:bg-gray-100 hover:text-black whitespace-nowrap"
+          >
+            {resetLabel}
+          </button>
+        )}
       </div>
 
       <div

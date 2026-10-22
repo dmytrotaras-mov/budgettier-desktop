@@ -1,5 +1,5 @@
 // Settings → Wallets: total balance, each wallet with its type and opening
-// balance, and an add/edit dialog.
+// balance, and an add/edit dialog (name, type, color, icon).
 //
 // A wallet's balance is always derived from its transactions (the Rust side
 // recomputes it on startup), so a new wallet's starting money is stored as an
@@ -11,24 +11,15 @@ import { invoke } from "@tauri-apps/api/core";
 import { format, parseISO } from "date-fns";
 import { apiCall } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrency } from "@/hooks/useCurrency";
-import { Banknote, Building2, ChartLine, CreditCard, PiggyBank, Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import OpeningBalanceDialog from "@/components/wallets/opening-balance-dialog";
+import { tint } from "@/lib/sectionUtils";
+import { WALLET_EMOJI, WALLET_TYPES, WalletIcon, walletColor, walletType } from "@/lib/walletUtils";
 import { SettingsCard } from "./settings-ui";
-
-const WALLET_TYPES: Record<string, { label: string; icon: typeof Banknote }> = {
-  bank: { label: "Bank", icon: Building2 },
-  cash: { label: "Cash", icon: Banknote },
-  savings: { label: "Savings", icon: PiggyBank },
-  investment: { label: "Investments", icon: ChartLine },
-  credit: { label: "Credit card", icon: CreditCard },
-};
-const typeInfo = (type: string) => WALLET_TYPES[type] ?? WALLET_TYPES.cash;
+import { DialogShell, Field, pill, textInput } from "./dialog-shell";
+import { ColorPicker, EmojiPicker } from "./categories/pickers";
 
 interface OpeningBalance {
   amount: string;
@@ -54,6 +45,8 @@ export default function WalletsSection() {
   const [editing, setEditing] = useState<any | null>(null);
   const [name, setName] = useState("");
   const [type, setType] = useState("bank");
+  const [color, setColor] = useState<string | null>(null); // null = type default
+  const [emoji, setEmoji] = useState(""); // "" = type icon
   const [startAmount, setStartAmount] = useState("");
   const [startDate, setStartDate] = useState(todayISO());
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -65,6 +58,8 @@ export default function WalletsSection() {
     setEditing(wallet);
     setName(wallet.name ?? "");
     setType(wallet.type ?? "bank");
+    setColor(wallet.color ?? null);
+    setEmoji(wallet.emoji ?? "");
     setStartAmount("");
     setStartDate(todayISO());
     setConfirmDelete(false);
@@ -79,7 +74,7 @@ export default function WalletsSection() {
   const save = useMutation({
     mutationFn: async () => {
       if (isNew) {
-        const created: any = await apiCall("POST", "/api/wallets", { name: name.trim(), type, balance: "0" });
+        const created: any = await apiCall("POST", "/api/wallets", { name: name.trim(), type, balance: "0", color: color ?? "", emoji });
         const amount = parseFloat(startAmount.replace(",", "."));
         if (amount && !Number.isNaN(amount)) {
           await invoke("set_opening_balance", {
@@ -87,7 +82,7 @@ export default function WalletsSection() {
           });
         }
       } else {
-        await apiCall("PUT", `/api/wallets/${editing.id}`, { name: name.trim(), type });
+        await apiCall("PUT", `/api/wallets/${editing.id}`, { name: name.trim(), type, color: color ?? "", emoji });
       }
     },
     onSuccess: () => {
@@ -135,8 +130,7 @@ export default function WalletsSection() {
           </p>
         )}
         {wallets.map((wallet: any, index: number) => {
-          const info = typeInfo(wallet.type);
-          const Icon = info.icon;
+          const info = walletType(wallet.type);
           const opening = openingFor(index);
           const balance = parseFloat(wallet.balance || "0");
           return (
@@ -147,9 +141,7 @@ export default function WalletsSection() {
               style={{ minHeight: 60, paddingTop: 10, paddingBottom: 10 }}
             >
               <div className="flex items-center gap-3 min-w-0">
-                <div className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0">
-                  <Icon className="h-[18px] w-[18px] text-gray-600" />
-                </div>
+                <WalletIcon wallet={wallet} />
                 <div className="min-w-0">
                   <div style={{ fontFamily: "Inter", fontSize: 14, fontWeight: 500, color: "#000" }}>{wallet.name}</div>
                   <div style={{ fontFamily: "Inter", fontSize: 12, color: "#6B7280" }}>
@@ -171,102 +163,107 @@ export default function WalletsSection() {
         })}
       </SettingsCard>
 
-      <Dialog open={editing !== null} onOpenChange={(open) => !open && setEditing(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{isNew ? "Add wallet" : "Edit wallet"}</DialogTitle>
-          </DialogHeader>
-          <form
-            className="space-y-4"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (name.trim()) save.mutate();
-            }}
-          >
-            <div className="space-y-1.5">
-              <Label htmlFor="wallet-name">Name</Label>
-              <Input id="wallet-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="N26" autoFocus />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Type</Label>
-              <Select value={type} onValueChange={setType}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {Object.entries(WALLET_TYPES).map(([value, { label }]) => (
-                    <SelectItem key={value} value={value}>{label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {isNew ? (
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="wallet-start">Opening balance</Label>
-                  <Input
-                    id="wallet-start"
-                    inputMode="decimal"
-                    value={startAmount}
-                    onChange={(e) => setStartAmount(e.target.value)}
-                    placeholder="0.00"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="wallet-start-date">As of</Label>
-                  <Input id="wallet-start-date" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-                </div>
-              </div>
+      {editing !== null && (
+        <DialogShell
+          title={isNew ? "Add wallet" : "Edit wallet"}
+          onClose={() => setEditing(null)}
+          onSave={() => save.mutate()}
+          saveLabel={save.isPending ? "Saving…" : isNew ? "Add wallet" : "Save"}
+          canSave={!!name.trim() && !save.isPending}
+          deleteSlot={
+            isNew ? undefined : confirmDelete ? (
+              <button
+                type="button"
+                onClick={() => remove.mutate()}
+                disabled={remove.isPending}
+                className={`${pill} bg-red-600 text-white hover:bg-red-700`}
+              >
+                {remove.isPending ? "Deleting…" : `Delete ${editing?.name}`}
+              </button>
             ) : (
-              <div className="flex items-center justify-between rounded-xl bg-gray-50 px-3 py-2.5">
-                <div>
-                  <div className="text-sm font-medium">Opening balance</div>
-                  <div className="text-xs text-gray-500">Money in this wallet before you started tracking</div>
-                </div>
-                <Button type="button" variant="outline" size="sm" onClick={() => setOpeningWallet(editing)}>
-                  Edit
-                </Button>
-              </div>
-            )}
-
-            <DialogFooter className="flex-row items-center sm:justify-between gap-2">
-              {!isNew ? (
-                confirmDelete ? (
-                  <Button
+              <button type="button" onClick={() => setConfirmDelete(true)} className={`${pill} inline-flex items-center gap-1.5 text-red-600 hover:bg-red-50`}>
+                <Trash2 size={14} /> Delete
+              </button>
+            )
+          }
+        >
+          <Field label="Name">
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="N26" className={textInput} autoFocus />
+          </Field>
+          <Field label="Type">
+            <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Type">
+              {Object.entries(WALLET_TYPES).map(([value, t]) => {
+                const active = type === value;
+                const Icon = t.icon;
+                return (
+                  <button
+                    key={value}
                     type="button"
-                    variant="destructive"
-                    onClick={() => remove.mutate()}
-                    disabled={remove.isPending}
+                    role="radio"
+                    aria-checked={active}
+                    onClick={() => setType(value)}
+                    className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-[12px] font-medium border transition-colors ${
+                      active ? "border-black ring-1 ring-black text-black" : "border-gray-200 text-gray-600 hover:border-gray-400"
+                    }`}
+                    style={{ backgroundColor: active ? tint(walletColor({ type: value, color }), 0.88) : "#fff" }}
                   >
-                    {remove.isPending ? "Deleting…" : `Delete ${editing?.name}`}
-                  </Button>
-                ) : (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                    onClick={() => setConfirmDelete(true)}
-                  >
-                    <Trash2 className="h-4 w-4 mr-1" />
-                    Delete
-                  </Button>
-                )
-              ) : (
-                <span />
+                    <Icon size={14} color={walletColor({ type: value, color })} />
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+          </Field>
+          <Field
+            label="Color"
+            hint={color ? undefined : `Default for ${walletType(type).label.toLowerCase()} — pick one to make it yours`}
+          >
+            <div className="flex items-start gap-3">
+              <ColorPicker value={walletColor({ type, color })} onChange={setColor} />
+              {color && (
+                <button type="button" onClick={() => setColor(null)} className={`${pill} text-gray-600 hover:bg-gray-100 hover:text-black whitespace-nowrap ml-auto`}>
+                  Use default
+                </button>
               )}
-              <div className="flex gap-2">
-                <Button type="button" variant="outline" onClick={() => setEditing(null)}>
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={!name.trim() || save.isPending}>
-                  {save.isPending ? "Saving…" : isNew ? "Add wallet" : "Save"}
-                </Button>
+            </div>
+          </Field>
+          <Field label="Icon">
+            <EmojiPicker
+              value={emoji}
+              onChange={setEmoji}
+              tint={tint(walletColor({ type, color }), 0.85)}
+              placeholder={(() => {
+                const Icon = walletType(type).icon;
+                return <Icon size={22} color={walletColor({ type, color })} />;
+              })()}
+              extraGroups={[{ name: "Wallets", items: WALLET_EMOJI }]}
+              onReset={() => setEmoji("")}
+              resetLabel="Type icon"
+            />
+          </Field>
+
+          {isNew ? (
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Opening balance">
+                <input inputMode="decimal" value={startAmount} onChange={(e) => setStartAmount(e.target.value)} placeholder="0.00" className={textInput} />
+              </Field>
+              <Field label="As of">
+                <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className={textInput} />
+              </Field>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between rounded-2xl bg-gray-50 px-4 py-3">
+              <div>
+                <div className="text-sm font-medium">Opening balance</div>
+                <div className="text-xs text-gray-500">Money in this wallet before you started tracking</div>
               </div>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+              <button type="button" onClick={() => setOpeningWallet(editing)} className={`${pill} bg-white border border-gray-200 hover:border-gray-400`}>
+                Edit
+              </button>
+            </div>
+          )}
+        </DialogShell>
+      )}
 
       {openingWallet && (
         <OpeningBalanceDialog

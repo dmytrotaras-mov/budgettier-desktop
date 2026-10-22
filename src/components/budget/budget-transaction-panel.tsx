@@ -18,6 +18,8 @@ import ImportWiseDialog from "@/components/settings/import-wise-dialog";
 import { PillTabs } from "@/components/overview/category-breakdown";
 import { TransactionFilters, type TypeFilter } from "./transaction-filters";
 import { SpendingCalendar } from "./spending-calendar";
+import { EntityIcon } from "@/components/ui/entity-icon";
+import { sectionColor, useSections } from "@/lib/sectionUtils";
 
 // Category emojis mapping
 const categoryEmojis = {
@@ -120,6 +122,11 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
   const { data: wallets = [] } = useQuery<Wallet[]>({
     queryKey: ["/api/wallets"],
   });
+
+  const { data: allSections = [] } = useSections();
+  /** Icon tint: the category's group color; transfers stay neutral. */
+  const iconColor = (category: Category | null) =>
+    category?.section ? sectionColor(allSections, category.section, category.type as "income" | "expense") : undefined;
 
   const getCategory = (categoryId: string | null): Category | null => {
     if (!categoryId) return null;
@@ -444,9 +451,7 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
                           onClick={() => handleEditTransaction(transaction)}
                         >
                           <div className="flex items-center gap-3 md:gap-2 flex-1 min-w-0">
-                            <div className="w-10 h-10 md:w-8 md:h-8 bg-gray-100 rounded-full flex items-center justify-center flex-shrink-0">
-                              <span className="text-lg md:text-base">{emoji}</span>
-                            </div>
+                            <EntityIcon emoji={emoji} color={isTransfer ? null : iconColor(category)} size={36} />
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-medium text-gray-900 truncate" title={transaction.description || undefined}>
                                 {displayMerchantName(transaction.description) || (isTransfer ? `${fromWalletName} → ${toWalletName}` : categoryName)}
@@ -472,8 +477,8 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
 
                           <div className="text-right flex-shrink-0">
                             <p className={`text-base md:text-sm font-semibold flex items-center justify-end ${
-                              isIncome ? "text-green-600" : isTransfer ? "text-blue-600" : "text-black"
-                            }`}>
+                              isTransfer ? "text-gray-500" : "text-black"
+                            }`} style={isIncome ? { color: POSITIVE } : undefined}>
                               {isTransfer ? "" : (isIncome ? "+" : "-")}{formatCurrency(transaction.amount)}
                               {isTransfer ? (
                                 <ArrowRight className="w-3 h-3 ml-1" />
@@ -559,9 +564,7 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
                           }}
                         >
                           <div className="flex items-center gap-3 md:gap-2 flex-1 min-w-0">
-                            <div className="w-10 h-10 md:w-8 md:h-8 bg-gray-100 rounded-full flex items-center justify-center flex-shrink-0">
-                              <span className="text-lg md:text-base">{emoji}</span>
-                            </div>
+                            <EntityIcon emoji={emoji} color={isTransfer ? null : iconColor(category)} size={36} />
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-medium text-gray-900 truncate" title={transaction.description || undefined}>
                                 {displayMerchantName(transaction.description) || (isTransfer ? `${fromWalletName} → ${toWalletName}` : categoryName)}
@@ -587,8 +590,8 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
 
                           <div className="text-right flex-shrink-0">
                             <p className={`text-base md:text-sm font-semibold flex items-center justify-end ${
-                              isIncome ? "text-green-600" : isTransfer ? "text-blue-600" : "text-black"
-                            }`}>
+                              isTransfer ? "text-gray-500" : "text-black"
+                            }`} style={isIncome ? { color: POSITIVE } : undefined}>
                               {isTransfer ? "" : (isIncome ? "+" : "-")}{formatCurrency(transaction.amount)}
                               {isTransfer ? (
                                 <ArrowRight className="w-3 h-3 ml-1" />

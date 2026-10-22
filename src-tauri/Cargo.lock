@@ -330,7 +330,7 @@ dependencies = [
 
 [[package]]
 name = "budgettier-desktop"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "r2d2",
  "r2d2_sqlite",

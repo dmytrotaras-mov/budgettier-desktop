@@ -335,6 +335,12 @@ const MIGRATIONS: &[&str] = &[
             WHERE r.id = sections.id
         ) WHERE hidden = 0;
     "#,
+    // ---- v9: a color and an icon per wallet ----
+    // NULL means "use the wallet type's default" (see src/lib/walletUtils.ts).
+    r#"
+        ALTER TABLE wallets ADD COLUMN color TEXT;
+        ALTER TABLE wallets ADD COLUMN emoji TEXT;
+    "#,
 ];
 
 /// Apply any migrations newer than the database's current `user_version`.

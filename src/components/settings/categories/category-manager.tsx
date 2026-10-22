@@ -7,7 +7,6 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, Check, Pencil, Plus, Search, Trash2 } from "lucide-react";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiCall } from "@/lib/queryClient";
 import { PillTabs } from "@/components/overview/category-breakdown";
@@ -23,6 +22,7 @@ import {
   type Section,
 } from "@/lib/sectionUtils";
 import { ColorPicker, EmojiPicker } from "./pickers";
+import { DialogShell, Field, pill, textInput } from "../dialog-shell";
 
 type Flow = "expense" | "income";
 
@@ -34,7 +34,6 @@ interface Category {
   section: string | null;
 }
 
-const pill = "h-9 px-4 rounded-full text-[13px] font-medium transition-colors";
 const grayPill = `${pill} bg-[#F3F4F6] text-black hover:bg-black hover:text-white`;
 
 export default function CategoryManager() {
@@ -258,75 +257,6 @@ export default function CategoryManager() {
     </div>
   );
 }
-
-function DialogShell({
-  title,
-  children,
-  onClose,
-  onSave,
-  saveLabel,
-  canSave,
-  deleteSlot,
-  danger,
-  onCancel,
-  cancelLabel = "Cancel",
-}: {
-  title: string;
-  children: React.ReactNode;
-  onClose: () => void;
-  onSave: () => void;
-  saveLabel: string;
-  canSave: boolean;
-  deleteSlot?: React.ReactNode;
-  /** Destructive step: the primary button turns red. */
-  danger?: boolean;
-  onCancel?: () => void;
-  cancelLabel?: string;
-}) {
-  return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:!max-w-[480px] rounded-[20px]" onOpenAutoFocus={(e) => e.preventDefault()}>
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-        </DialogHeader>
-        <form
-          className="flex flex-col gap-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (canSave) onSave();
-          }}
-        >
-          {children}
-          <DialogFooter className="flex-row items-center gap-2 border-t border-gray-100 -mx-6 px-6 pt-4 mt-1">
-            <div className="mr-auto">{deleteSlot}</div>
-            <button type="button" onClick={onCancel ?? onClose} className={`${pill} text-gray-600 hover:bg-gray-100 hover:text-black`}>
-              {cancelLabel}
-            </button>
-            <button
-              type="submit"
-              disabled={!canSave}
-              className={`${pill} text-white disabled:bg-gray-100 disabled:text-gray-400 ${danger ? "bg-red-600 hover:bg-red-700" : "bg-black hover:bg-gray-800"}`}
-            >
-              {saveLabel}
-            </button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div className="text-sm font-medium text-gray-900">{label}</div>
-      {hint && <div className="text-xs text-gray-500">{hint}</div>}
-      <div className="mt-2">{children}</div>
-    </div>
-  );
-}
-
-const textInput = "w-full h-10 rounded-xl bg-gray-100 px-3 text-sm outline-none focus:bg-white focus:ring-2 focus:ring-black/10";
 
 function DeleteButton({ onClick }: { onClick: () => void }) {
   return (
