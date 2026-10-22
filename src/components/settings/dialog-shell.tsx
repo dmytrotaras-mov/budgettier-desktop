@@ -18,6 +18,7 @@ export function DialogShell({
   danger,
   onCancel,
   cancelLabel = "Cancel",
+  hideCancel,
 }: {
   title: string;
   children: React.ReactNode;
@@ -30,6 +31,8 @@ export function DialogShell({
   danger?: boolean;
   onCancel?: () => void;
   cancelLabel?: string;
+  /** A one-button step (e.g. "Done"). */
+  hideCancel?: boolean;
 }) {
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -47,9 +50,11 @@ export function DialogShell({
           <div className="flex flex-col gap-4 min-h-0 overflow-y-auto -mx-2 px-2 pb-1">{children}</div>
           <DialogFooter className="flex-shrink-0 flex-row items-center gap-2 border-t border-gray-100 -mx-6 px-6 pt-4">
             <div className="mr-auto">{deleteSlot}</div>
-            <button type="button" onClick={onCancel ?? onClose} className={`${pill} text-gray-600 hover:bg-gray-100 hover:text-black`}>
-              {cancelLabel}
-            </button>
+            {!hideCancel && (
+              <button type="button" onClick={onCancel ?? onClose} className={`${pill} text-gray-600 hover:bg-gray-100 hover:text-black`}>
+                {cancelLabel}
+              </button>
+            )}
             <button
               type="submit"
               disabled={!canSave}

@@ -8,13 +8,18 @@
 //
 // Classification logic (per row):
 //   * Skip empty rows.
-//   * `Transaction Details Type = CONVERSION` and description matches
-//     "Moved X EUR from <Y>" → transfer. Source wallet = match by name.
+//   * `Transaction Details Type = CONVERSION` ("Moved X EUR from <Y>" /
+//     "Moved X EUR to <Y>") → transfer between this wallet and <Y>, matched
+//     by name. The SIGN of the amount gives the direction: negative = money
+//     left this wallet.
 //   * `Transaction Type = CREDIT` AND amount > 0 → income (or transfer
 //     if Payer Name == Card Holder Full Name).
 //   * Otherwise (`DEBIT`) → expense.
 //
-// Dedup: by TransferWise ID column → external_id in DB.
+// Dedup: by TransferWise ID column → external_id in DB. A move between two
+// Wise balances appears in BOTH balances' statements under different IDs, so
+// a transfer that already exists between the same two wallets (same amount,
+// same direction, within two minutes) is flagged as a duplicate too.
 //
 // Pre-auth pairs: two rows with same merchant + same |amount| + opposite
 // signs within 60 seconds → both flagged "pre-auth" and unchecked by default.
@@ -43,9 +48,14 @@ pub struct PreviewRow {
     /// The rule pattern that produced suggested_category_id, shown in the
     /// preview so a wrong auto-match is easy to spot.
     pub matched_pattern: Option<String>,
-    /// For transfers only: suggested source wallet id (if Wise tells us
-    /// "Moved from <name>" and we found a matching wallet).
-    pub suggested_from_wallet_id: Option<String>,
+    /// For transfers only: the other wallet (Wise says "Moved … from <name>"
+    /// or "Moved … to <name>"), if a wallet with that name exists.
+    pub suggested_other_wallet_id: Option<String>,
+    /// For transfers only: the other balance's name as Wise wrote it, so the
+    /// UI can remember which wallet the user picked for it.
+    pub other_name: Option<String>,
+    /// Money left the imported wallet (negative amount in the statement).
+    pub outgoing: bool,
     /// Flags the UI shows: "duplicate", "pre-auth", "transfer", "fee", "cashback"
     pub flags: Vec<String>,
     /// Whether to import this row (false if duplicate or pre-auth pair).
@@ -56,6 +66,15 @@ pub struct PreviewRow {
 pub struct PreviewResult {
     pub rows: Vec<PreviewRow>,
     pub summary: PreviewSummary,
+    /// The balance after the statement's latest operation ("Running
+    /// Balance"), used to check the wallet against the bank after import.
+    pub statement_balance: Option<StatementBalance>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StatementBalance {
+    pub balance: String,
+    pub date_ms: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -85,7 +104,10 @@ pub struct ConfirmedRow {
     pub date_ms: i64,
     pub description: String,
     pub category_id: Option<String>,
-    pub from_wallet_id: Option<String>,
+    /// Transfers: the other wallet. `outgoing` decides which side it's on.
+    pub other_wallet_id: Option<String>,
+    #[serde(default)]
+    pub outgoing: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -132,7 +154,7 @@ pub fn preview_wise_csv(
             .map_err(|e| e.to_string())?;
         mapped
             .filter_map(|r| r.ok())
-            .map(|(id, name)| (name.to_lowercase(), id))
+            .map(|(id, name)| (normalize_name(&name), id))
             .collect()
     };
 
@@ -171,13 +193,17 @@ pub fn preview_wise_csv(
         }
 
         // Classify: type + optional source wallet
-        let (kind, suggested_from_wallet_id) = if details_type == "CONVERSION" {
-            // "Moved 300.00 EUR from 10%" — internal Wise transfer (from another
-            // Wise pocket or a separately-tracked wallet in Budgettier).
-            let from = extract_moved_from(&description)
-                .and_then(|name| wallets_by_lower_name.get(&name.to_lowercase()).cloned());
+        let outgoing = amount_f < 0.0;
+        let mut other_name: Option<String> = None;
+        let (kind, suggested_other_wallet_id) = if details_type == "CONVERSION" {
+            // "Moved 300.00 EUR from 10%" / "Moved 400.00 EUR to 10%" — a move
+            // between Wise balances (each tracked as its own wallet here).
+            other_name = extract_moved_counterpart(&description);
+            let other = other_name
+                .as_ref()
+                .and_then(|name| wallets_by_lower_name.get(&normalize_name(name)).cloned());
             flags.push("transfer".into());
-            ("transfer".to_string(), from)
+            ("transfer".to_string(), other)
         } else if tx_type == "CREDIT" {
             // External CREDIT. If the payer is the user themself → likely a
             // self-transfer from another bank (e.g. N26 → Wise).
@@ -240,10 +266,35 @@ pub fn preview_wise_csv(
             merchant: merchant.clone(),
             suggested_category_id,
             matched_pattern,
-            suggested_from_wallet_id,
+            suggested_other_wallet_id,
+            other_name,
+            outgoing,
             flags,
             include,
         });
+    }
+
+    // ---- Step 1b: moves already recorded from the other balance's statement ----
+    for row in preview.iter_mut() {
+        let (true, Some(other), true) = (row.type_ == "transfer", row.suggested_other_wallet_id.as_ref(), row.include) else {
+            continue;
+        };
+        // Outgoing here = incoming there: look for a transfer INTO `other`
+        // (or, for an incoming move, OUT OF `other`) at the same moment.
+        let n: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM transactions
+                 WHERE type = 'transfer' AND CAST(amount AS REAL) = CAST(?1 AS REAL)
+                   AND abs(date - ?2) <= 120000
+                   AND ((?3 = 1 AND to_wallet_id = ?4) OR (?3 = 0 AND from_wallet_id = ?4))",
+                params![row.amount, row.date_ms, row.outgoing as i64, other],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if n > 0 {
+            row.include = false;
+            row.flags.push("duplicate".into());
+        }
     }
 
     // ---- Step 2: detect pre-authorization pairs ----
@@ -262,7 +313,18 @@ pub fn preview_wise_csv(
         .filter(|r| r.flags.contains(&"uncategorized".into()))
         .count();
 
+    let statement_balance = raw_rows
+        .iter()
+        .filter_map(|r| {
+            let balance: f64 = r.get("Running Balance")?.trim().parse().ok()?;
+            let date_ms = parse_wise_datetime(r.get("Date Time")?)?;
+            Some((date_ms, balance))
+        })
+        .max_by_key(|(date_ms, _)| *date_ms)
+        .map(|(date_ms, balance)| StatementBalance { balance: format!("{balance:.2}"), date_ms });
+
     Ok(PreviewResult {
+        statement_balance,
         rows: preview,
         summary: PreviewSummary {
             total,
@@ -308,17 +370,17 @@ pub fn import_wise_csv(
 
         // Validation per type
         if row.type_ == "transfer" {
-            let from = row
-                .from_wallet_id
+            let other = row
+                .other_wallet_id
                 .as_ref()
-                .ok_or_else(|| format!("transfer row {} missing from_wallet_id", row.external_id))?;
-            if *from == input.target_wallet_id {
+                .ok_or_else(|| format!("transfer row {} needs the other wallet", row.external_id))?;
+            if *other == input.target_wallet_id {
                 return Err(format!(
-                    "transfer row {} cannot have same source and target wallet",
+                    "transfer row {} cannot go to and from the same wallet",
                     row.external_id
                 ));
             }
-            affected_wallets.insert(from.clone());
+            affected_wallets.insert(other.clone());
         } else if row.category_id.is_none() {
             return Err(format!(
                 "row {} ({}) needs a category before import",
@@ -326,6 +388,13 @@ pub fn import_wise_csv(
             ));
         }
 
+        // Transfers: negative amount in the statement = money left the
+        // imported wallet.
+        let (from_wallet, to_wallet) = match (&row.other_wallet_id, row.outgoing) {
+            (Some(other), true) => (Some(input.target_wallet_id.clone()), Some(other.clone())),
+            (Some(other), false) => (Some(other.clone()), Some(input.target_wallet_id.clone())),
+            (None, _) => (None, None),
+        };
         let id = uuid::Uuid::new_v4().to_string();
         tx.execute(
             "INSERT INTO transactions
@@ -344,16 +413,8 @@ pub fn import_wise_csv(
                 } else {
                     Some(input.target_wallet_id.clone())
                 },
-                if row.type_ == "transfer" {
-                    row.from_wallet_id.clone()
-                } else {
-                    None
-                },
-                if row.type_ == "transfer" {
-                    Some(input.target_wallet_id.clone())
-                } else {
-                    None
-                },
+                if row.type_ == "transfer" { from_wallet } else { None },
+                if row.type_ == "transfer" { to_wallet } else { None },
                 row.external_id,
             ],
         )
@@ -492,10 +553,36 @@ fn civil_to_ms(y: i32, m: u32, d: u32, hh: u32, mm: u32, ss: u32, ms: u32) -> i6
 // ===========================================================================
 
 /// Extract wallet name from "Moved 300.00 EUR from 10%".
-fn extract_moved_from(description: &str) -> Option<String> {
+/// Lowercase, with any run of whitespace (Wise writes "EUR\u{a0}Stocks" with a
+/// no-break space) collapsed to one plain space.
+fn normalize_name(name: &str) -> String {
+    name.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+}
+
+/// The other balance in "Moved 300.00 EUR from 10%" / "Moved 400.00 EUR to Save".
+fn extract_moved_counterpart(description: &str) -> Option<String> {
     let lower = description.to_lowercase();
-    let idx = lower.find(" from ")?;
-    Some(description[idx + 6..].trim().to_string())
+    let (idx, len) = match (lower.find(" from "), lower.find(" to ")) {
+        (Some(i), _) => (i, 6),
+        (None, Some(i)) => (i, 4),
+        (None, None) => return None,
+    };
+    let name = description[idx + len..].trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn counterpart_from_both_directions() {
+        assert_eq!(extract_moved_counterpart("Moved 300.00 EUR from 10%").as_deref(), Some("10%"));
+        assert_eq!(extract_moved_counterpart("Moved 400.00 EUR to 10%").as_deref(), Some("10%"));
+        assert_eq!(extract_moved_counterpart("Moved 2,601.83 EUR to Save").as_deref(), Some("Save"));
+        assert_eq!(extract_moved_counterpart("Card transaction"), None);
+        assert_eq!(normalize_name("EUR\u{a0}Stocks"), normalize_name("eur stocks"));
+    }
 }
 
 /// Walk through preview rows; pair up pre-auth rows in-place by marking

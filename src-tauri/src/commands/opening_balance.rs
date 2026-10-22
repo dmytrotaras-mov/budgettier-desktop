@@ -42,22 +42,24 @@ pub struct SetOpeningInput {
     pub date: String,
 }
 
-/// Ensure the two Opening Balance categories exist. Called during db init.
-/// Idempotent — only inserts if missing.
+/// Ensure the System categories exist (Opening Balance, and Balance
+/// adjustment for balance checks). Called during db init. Idempotent.
 pub fn seed_opening_categories(conn: &Connection) -> rusqlite::Result<()> {
-    for type_ in ["income", "expense"] {
-        let exists: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM categories WHERE name = ?1 AND type = ?2",
-            params![OPENING_CATEGORY_NAME, type_],
-            |r| r.get(0),
-        )?;
-        if exists == 0 {
-            let id = Uuid::new_v4().to_string();
-            conn.execute(
-                "INSERT INTO categories (id, name, type, color, emoji, section)
-                 VALUES (?1, ?2, ?3, '#9CA3AF', '🏦', 'System')",
-                params![id, OPENING_CATEGORY_NAME, type_],
+    for (name, emoji) in [(OPENING_CATEGORY_NAME, "🏦"), ("Balance adjustment", "⚖️")] {
+        for type_ in ["income", "expense"] {
+            let exists: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM categories WHERE name = ?1 AND type = ?2",
+                params![name, type_],
+                |r| r.get(0),
             )?;
+            if exists == 0 {
+                let id = Uuid::new_v4().to_string();
+                conn.execute(
+                    "INSERT INTO categories (id, name, type, color, emoji, section)
+                     VALUES (?1, ?2, ?3, '#9CA3AF', ?4, 'System')",
+                    params![id, name, type_, emoji],
+                )?;
+            }
         }
     }
     Ok(())

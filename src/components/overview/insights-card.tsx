@@ -7,6 +7,7 @@ import { POSITIVE, NEGATIVE } from "@/lib/colors";
 import { endOfMonth, format, getDaysInMonth, isSameMonth, startOfMonth, subMonths } from "date-fns";
 import { AlertTriangle, CalendarClock, PiggyBank, Sparkles, TrendingDown, TrendingUp, Wallet } from "lucide-react";
 import { OverviewCard } from "./overview-card";
+import { checkState, needsChecking, useWalletChecks } from "@/lib/walletChecks";
 
 type Tone = "good" | "warn" | "bad" | "neutral";
 interface Insight {
@@ -31,6 +32,8 @@ interface Props {
   viewMode: "month" | "year";
   budget?: { exists: boolean; allocations: { categoryId: string | null; allocatedAmount: string }[] } | null;
   formatCurrency: (n: number) => string;
+  /** For the "check your balances" reminder. */
+  wallets?: any[];
 }
 
 const counts = (t: any) => !t.excludeFromBudget && !t.isOpening;
@@ -39,8 +42,9 @@ const ordinal = (d: number) => {
   return `${d}${s}`;
 };
 
-export function InsightsCard({ transactions, categories, selectedDate, viewMode, budget, formatCurrency }: Props) {
+export function InsightsCard({ transactions, categories, selectedDate, viewMode, budget, formatCurrency, wallets = [] }: Props) {
   const money = (n: number) => formatCurrency(Math.round(n)).replace(/\.00$/, "");
+  const { data: checks = [] } = useWalletChecks();
 
   const insights = useMemo(() => {
     const out: Insight[] = [];
@@ -218,8 +222,35 @@ export function InsightsCard({ transactions, categories, selectedDate, viewMode,
       });
     }
 
+    // 0. Balances that don't match the bank, or haven't been checked for a
+    //    while — shown first, and only while looking at the current month.
+    if (viewMode === "month" && isSameMonth(selectedDate, now)) {
+      const states = wallets
+        .filter((w) => needsChecking(w, transactions, now))
+        .map((w) => ({ w, s: checkState(checks.find((c) => c.walletId === w.id), now) }));
+      const off = states.filter((x) => x.s.kind === "off");
+      const due = states.filter((x) => x.s.kind === "due" || x.s.kind === "never");
+      if (off.length) {
+        out.unshift({
+          id: "check-off",
+          tone: "bad",
+          icon: AlertTriangle,
+          title: `${off.map((x) => x.w.name).join(", ")} ${off.length === 1 ? "doesn't" : "don't"} match the bank`,
+          detail: "Open Wallets to see what changed and fix the difference",
+        });
+      } else if (due.length) {
+        out.unshift({
+          id: "check-due",
+          tone: "neutral",
+          icon: Wallet,
+          title: `Time to check ${due.map((x) => x.w.name).join(", ")}`,
+          detail: "Compare with your bank app — takes a few seconds",
+        });
+      }
+    }
+
     return out.slice(0, 4);
-  }, [transactions, categories, selectedDate, viewMode, budget]);
+  }, [transactions, categories, selectedDate, viewMode, budget, wallets, checks]);
 
   return (
     <OverviewCard

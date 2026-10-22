@@ -48,7 +48,11 @@ interface PreviewRow {
   suggested_category_id: string | null;
   // Rule pattern that auto-filled the category (cleared once the user picks).
   matched_pattern: string | null;
-  suggested_from_wallet_id: string | null;
+  // Transfers: the other wallet, the other balance's name as Wise wrote it,
+  // and whether money left the imported wallet (negative amount).
+  suggested_other_wallet_id: string | null;
+  other_name: string | null;
+  outgoing: boolean;
   flags: string[];
   include: boolean;
 }
@@ -63,6 +67,9 @@ interface PreviewResult {
     transfers: number;
     uncategorized: number;
   };
+  // Balance after the statement's latest operation — checked against the
+  // wallet once the import is done.
+  statement_balance: { balance: string; date_ms: number } | null;
 }
 
 interface Props {
@@ -71,6 +78,27 @@ interface Props {
 }
 
 const LAST_WALLET_KEY = "wiseImportWalletId";
+// Each Wise balance has its own statement ("statement_<account>_EUR_…csv") and
+// its own wallet here; remember which wallet each account goes to, and which
+// wallet each balance name in "Moved … to <name>" means.
+const ACCOUNT_WALLETS_KEY = "wiseAccountWallets";
+const BALANCE_NAMES_KEY = "wiseBalanceNames";
+
+function readMap(key: string): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(key) || "{}");
+  } catch {
+    return {};
+  }
+}
+function writeMap(key: string, patch: Record<string, string>) {
+  try {
+    localStorage.setItem(key, JSON.stringify({ ...readMap(key), ...patch }));
+  } catch {
+    // A convenience only; ignore storage errors.
+  }
+}
+const accountOf = (path: string) => path.match(/statement_(\d+)_/)?.[1] ?? null;
 
 export default function ImportWiseDialog({ open, onClose }: Props) {
   const { toast } = useToast();
@@ -83,6 +111,8 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
   const [doneSummary, setDoneSummary] = useState<{ inserted: number; skipped: number } | null>(
     null,
   );
+  // Statement balance vs the wallet after import: diff = Budgettier − bank.
+  const [bankCheck, setBankCheck] = useState<{ diff: number; bank: number; at: number } | null>(null);
   // Merchant patterns the user chose to remember → saved as category rules on import.
   // Map of pattern (e.g. "Bolt") → categoryId.
   const [rulesToSave, setRulesToSave] = useState<Record<string, string>>({});
@@ -111,6 +141,12 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
       wallets.find((w: any) => /wise/i.test(w.name));
     if (pick) setTargetWalletId(pick.id);
   }, [open, wallets, targetWalletId]);
+  // A statement of a known Wise account goes to the wallet it went to before.
+  useEffect(() => {
+    const account = accountOf(filePath);
+    const known = account ? readMap(ACCOUNT_WALLETS_KEY)[account] : undefined;
+    if (known && wallets.some((w: any) => w.id === known)) setTargetWalletId(known);
+  }, [filePath, wallets]);
   const { data: categories = [] } = useQuery<Category[]>({ queryKey: ["/api/categories"] });
   const { data: allSections = [] } = useSections();
 
@@ -124,6 +160,7 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
     setTargetWalletId("");
     setPreview(null);
     setDoneSummary(null);
+    setBankCheck(null);
     setRulesToSave({});
     setApplyPrompt(null);
   };
@@ -153,7 +190,7 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
   // field: a category for income/expense, or a source wallet for transfers.
   const rowNeedsAttention = (r: PreviewRow): boolean => {
     if (!r.include) return false;
-    if (r.type === "transfer") return !r.suggested_from_wallet_id;
+    if (r.type === "transfer") return !r.suggested_other_wallet_id;
     return !r.suggested_category_id;
   };
 
@@ -193,6 +230,13 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
       const result = await invoke<PreviewResult>("preview_wise_csv", {
         filePath,
       });
+      // Fill in balances the user has matched to a wallet before ("EUR" → Wise).
+      const names = readMap(BALANCE_NAMES_KEY);
+      result.rows = result.rows.map((r) =>
+        r.type === "transfer" && !r.suggested_other_wallet_id && r.other_name && names[r.other_name] && names[r.other_name] !== targetWalletId
+          ? { ...r, suggested_other_wallet_id: names[r.other_name] }
+          : r,
+      );
       setPreview(result);
       setStage("preview");
     } catch (err: any) {
@@ -204,6 +248,20 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
     } finally {
       setBusy(false);
     }
+  };
+
+  // Picking the other wallet for one "Moved … to 10%" row fills every row that
+  // names the same balance, and is remembered for next time.
+  const pickOtherWallet = (idx: number, walletId: string) => {
+    if (!preview) return;
+    const name = preview.rows[idx].other_name;
+    const rows = preview.rows.map((r, i) =>
+      i === idx || (name && r.type === "transfer" && r.other_name === name && !r.suggested_other_wallet_id)
+        ? { ...r, suggested_other_wallet_id: walletId }
+        : r,
+    );
+    setPreview({ ...preview, rows });
+    if (name) writeMap(BALANCE_NAMES_KEY, { [name]: walletId });
   };
 
   const updateRow = (idx: number, patch: Partial<PreviewRow>) => {
@@ -275,7 +333,8 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
         date_ms: r.date_ms,
         description: r.description,
         category_id: r.type === "transfer" ? null : r.suggested_category_id,
-        from_wallet_id: r.type === "transfer" ? r.suggested_from_wallet_id : null,
+        other_wallet_id: r.type === "transfer" ? r.suggested_other_wallet_id : null,
+        outgoing: r.outgoing,
       }));
 
     // Client-side validation before sending
@@ -291,12 +350,12 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
       return;
     }
     const missingWallet = rows.find(
-      (r) => r.type === "transfer" && !r.from_wallet_id,
+      (r) => r.type === "transfer" && !r.other_wallet_id,
     );
     if (missingWallet) {
       toast({
         title: "Fix transfer rows",
-        description: `Transfer "${missingWallet.description}" needs a source wallet.`,
+        description: `Transfer "${missingWallet.description}" needs the other wallet.`,
         variant: "destructive",
       });
       return;
@@ -315,6 +374,8 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
       } catch {
         // Remembering the wallet is a convenience; ignore storage errors.
       }
+      const account = accountOf(filePath);
+      if (account) writeMap(ACCOUNT_WALLETS_KEY, { [account]: targetWalletId });
       // Persist any remembered merchant→category rules so future imports and
       // manual entry auto-categorize them. Best-effort — a failed rule save
       // shouldn't fail the import that already succeeded.
@@ -332,6 +393,20 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
         queryClient.invalidateQueries({ queryKey: ["/api/category-rules"] });
       }
 
+      // The statement says what the bank held after its last operation:
+      // record that as a balance check, so a mismatch shows up right away.
+      if (preview.statement_balance) {
+        try {
+          const { balance, date_ms } = preview.statement_balance;
+          const saved = await invoke<{ appBalance: string }>("record_wallet_check", {
+            input: { walletId: targetWalletId, bankBalance: balance, atMs: date_ms, source: "statement" },
+          });
+          setBankCheck({ diff: Math.round((parseFloat(saved.appBalance) - parseFloat(balance)) * 100) / 100, bank: parseFloat(balance), at: date_ms });
+          queryClient.invalidateQueries({ queryKey: ["wallet-checks"] });
+        } catch {
+          // The import itself succeeded; the check is a bonus.
+        }
+      }
       setDoneSummary(res);
       setStage("done");
       queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
@@ -642,14 +717,16 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
                         </td>
                         <td style={{ padding: "8px 6px", verticalAlign: "top" }}>
                           {isTransfer ? (
+                            <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] text-gray-500 whitespace-nowrap" title={r.outgoing ? "Money left this wallet" : "Money came into this wallet"}>
+                              {r.outgoing ? "To" : "From"}
+                            </span>
                             <Select
-                              value={r.suggested_from_wallet_id ?? ""}
-                              onValueChange={(v) =>
-                                updateRow(idx, { suggested_from_wallet_id: v })
-                              }
+                              value={r.suggested_other_wallet_id ?? ""}
+                              onValueChange={(v) => pickOtherWallet(idx, v)}
                             >
                               <SelectTrigger style={{ height: 32 }}>
-                                <SelectValue placeholder="Source wallet…" />
+                                <SelectValue placeholder={r.other_name ? `${r.other_name}…` : "Wallet…"} />
                               </SelectTrigger>
                               <SelectContent>
                                 {wallets
@@ -661,6 +738,7 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
                                   ))}
                               </SelectContent>
                             </Select>
+                            </div>
                           ) : (
 <div>
                               <Select
@@ -707,6 +785,16 @@ export default function ImportWiseDialog({ open, onClose }: Props) {
                 <> · {doneSummary.skipped} skipped (already in DB)</>
               )}
             </div>
+            {bankCheck && (
+              <div
+                className="mx-auto mt-4 max-w-sm rounded-2xl px-4 py-3 text-sm"
+                style={{ backgroundColor: Math.abs(bankCheck.diff) < 0.01 ? "#ECFDF5" : "#FEF2F2", color: Math.abs(bankCheck.diff) < 0.01 ? POSITIVE : NEGATIVE }}
+              >
+                {Math.abs(bankCheck.diff) < 0.01
+                  ? `✓ Matches the bank: €${bankCheck.bank.toFixed(2)} after the last operation (${formatDate(bankCheck.at)})`
+                  : `Budgettier shows €${Math.abs(bankCheck.diff).toFixed(2)} ${bankCheck.diff > 0 ? "more" : "less"} than the statement (€${bankCheck.bank.toFixed(2)} on ${formatDate(bankCheck.at)}). Use Check in Wallets to find it.`}
+              </div>
+            )}
             <p style={{ color: "#9CA3AF", fontSize: 12, marginTop: 16 }}>
               Wallet balances have been recomputed from the new history.
             </p>

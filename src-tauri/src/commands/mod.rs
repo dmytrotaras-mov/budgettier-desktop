@@ -9,3 +9,4 @@ pub mod sections;
 pub mod settings;
 pub mod transactions;
 pub mod wallets;
+pub mod wallet_checks;

@@ -1,12 +1,15 @@
 // Wallets: where the money is. A share bar across wallets, then one compact row
 // per wallet with its balance, share and how much it moved in the selected period.
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { POSITIVE, NEGATIVE } from "@/lib/colors";
 import { useLocation } from "wouter";
 import { endOfMonth, format, startOfMonth } from "date-fns";
 import { OverviewCard } from "./overview-card";
 import { WalletIcon, walletColor, walletType } from "@/lib/walletUtils";
+import { checkState, needsChecking, useWalletChecks } from "@/lib/walletChecks";
+import { WalletCheckStatus } from "@/components/wallets/wallet-check-status";
+import { CheckBalanceDialog } from "@/components/wallets/check-balance-dialog";
 
 interface Props {
   wallets: any[];
@@ -18,6 +21,9 @@ interface Props {
 
 export function WalletsCard({ wallets, transactions, selectedDate, viewMode, formatCurrency }: Props) {
   const [, navigate] = useLocation();
+  const [checking, setChecking] = useState<any | null>(null);
+  const { data: checks = [] } = useWalletChecks();
+  const checkOf = (id: string) => checks.find((c) => c.walletId === id);
   const money = (n: number) => formatCurrency(Math.round(n)).replace(/\.00$/, "");
   const period = viewMode === "month" ? `in ${format(selectedDate, "MMMM")}` : `in ${selectedDate.getFullYear()}`;
 
@@ -88,14 +94,27 @@ export function WalletsCard({ wallets, transactions, selectedDate, viewMode, for
           {rows.map((w) => {
             const t = walletType(w.type);
             const share = positiveTotal > 0 && w.balance > 0 ? Math.round((w.balance / positiveTotal) * 100) : null;
+            const state = needsChecking(w, transactions) ? checkState(checkOf(w.id)) : null;
             return (
-              <div key={w.id} className="flex items-center gap-3 py-2 border-b border-gray-100 last:border-b-0">
+              <div
+                key={w.id}
+                onClick={() => setChecking(w)}
+                title="Check this balance against your bank"
+                className="flex items-center gap-3 py-2 px-2 -mx-2 rounded-xl border-b border-gray-100 last:border-b-0 cursor-pointer hover:bg-gray-50 transition-colors"
+              >
                 <WalletIcon wallet={w} />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-gray-900 truncate">{w.name}</div>
                   <div className="text-[11px] text-gray-500 truncate">
-                    {t.label}
-                    {share !== null && ` · ${share}%`}
+                    {state && state.kind !== "ok" ? (
+                      <WalletCheckStatus state={state} money={money} />
+                    ) : (
+                      <>
+                        {t.label}
+                        {share !== null && ` · ${share}%`}
+                        {state?.kind === "ok" && <span style={{ color: POSITIVE }}> · ✓</span>}
+                      </>
+                    )}
                   </div>
                 </div>
                 <div className="text-right flex-shrink-0">
@@ -111,6 +130,14 @@ export function WalletsCard({ wallets, transactions, selectedDate, viewMode, for
           })}
         </div>
       </div>
+      {checking && (
+        <CheckBalanceDialog
+          wallet={checking}
+          lastCheck={checkOf(checking.id)}
+          formatCurrency={formatCurrency}
+          onClose={() => setChecking(null)}
+        />
+      )}
     </OverviewCard>
   );
 }

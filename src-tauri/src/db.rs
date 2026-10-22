@@ -341,6 +341,18 @@ const MIGRATIONS: &[&str] = &[
         ALTER TABLE wallets ADD COLUMN color TEXT;
         ALTER TABLE wallets ADD COLUMN emoji TEXT;
     "#,
+    // ---- v10: balance checks (see commands/wallet_checks.rs) ----
+    r#"
+        CREATE TABLE IF NOT EXISTS wallet_checks (
+            id           TEXT PRIMARY KEY,
+            wallet_id    TEXT NOT NULL REFERENCES wallets(id) ON DELETE CASCADE,
+            checked_at   INTEGER NOT NULL,
+            bank_balance TEXT NOT NULL,
+            app_balance  TEXT NOT NULL,
+            source       TEXT NOT NULL DEFAULT 'manual'
+        );
+        CREATE INDEX IF NOT EXISTS idx_wallet_checks_wallet ON wallet_checks(wallet_id, checked_at);
+    "#,
 ];
 
 /// Apply any migrations newer than the database's current `user_version`.

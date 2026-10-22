@@ -20,6 +20,9 @@ import { WALLET_EMOJI, WALLET_TYPES, WalletIcon, walletColor, walletType } from 
 import { SettingsCard } from "./settings-ui";
 import { DialogShell, Field, pill, textInput } from "./dialog-shell";
 import { ColorPicker, EmojiPicker } from "./categories/pickers";
+import { CheckBalanceDialog } from "@/components/wallets/check-balance-dialog";
+import { WalletCheckStatus } from "@/components/wallets/wallet-check-status";
+import { checkState, needsChecking, useWalletChecks } from "@/lib/walletChecks";
 
 interface OpeningBalance {
   amount: string;
@@ -51,6 +54,10 @@ export default function WalletsSection() {
   const [startDate, setStartDate] = useState(todayISO());
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [openingWallet, setOpeningWallet] = useState<any | null>(null);
+  const [checkingWallet, setCheckingWallet] = useState<any | null>(null);
+  const { data: checks = [] } = useWalletChecks();
+  const { data: allTransactions = [] } = useQuery<any[]>({ queryKey: ["/api/transactions"] });
+  const checkOf = (id: string) => checks.find((c) => c.walletId === id);
 
   const isNew = editing && !editing.id;
 
@@ -150,14 +157,33 @@ export default function WalletsSection() {
                       ? ` · started with ${formatCurrency(parseFloat(opening.amount))} on ${format(parseISO(opening.date), "d MMM yyyy")}`
                       : " · no opening balance"}
                   </div>
+                  {needsChecking(wallet, allTransactions) && (
+                    <div className="text-[12px] mt-0.5">
+                      <WalletCheckStatus state={checkState(checkOf(wallet.id))} money={formatCurrency} />
+                    </div>
+                  )}
                 </div>
               </div>
-              <span
-                className="tabular-nums"
-                style={{ fontFamily: "Inter", fontSize: 14, fontWeight: 600, color: balance < 0 ? "#DC2626" : "#000" }}
-              >
-                {formatCurrency(balance)}
-              </span>
+              <div className="flex items-center gap-3 flex-shrink-0">
+                <span
+                  className="tabular-nums"
+                  style={{ fontFamily: "Inter", fontSize: 14, fontWeight: 600, color: balance < 0 ? "#DC2626" : "#000" }}
+                >
+                  {formatCurrency(balance)}
+                </span>
+                {needsChecking(wallet, allTransactions) && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCheckingWallet(wallet);
+                    }}
+                    className="h-8 px-3 rounded-full bg-[#F3F4F6] text-[12px] font-medium text-black hover:bg-black hover:text-white transition-colors"
+                  >
+                    Check
+                  </button>
+                )}
+              </div>
             </div>
           );
         })}
@@ -263,6 +289,15 @@ export default function WalletsSection() {
             </div>
           )}
         </DialogShell>
+      )}
+
+      {checkingWallet && (
+        <CheckBalanceDialog
+          wallet={checkingWallet}
+          lastCheck={checkOf(checkingWallet.id)}
+          formatCurrency={formatCurrency}
+          onClose={() => setCheckingWallet(null)}
+        />
       )}
 
       {openingWallet && (

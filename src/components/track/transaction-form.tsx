@@ -67,18 +67,22 @@ type FormData = z.infer<typeof formSchema>;
 interface TransactionFormProps {
   onSuccess?: () => void;
   initialDate?: Date | null;
+  /** Prefill for "add the missing transaction" after a balance check. */
+  initialAmount?: string;
+  initialType?: "expense" | "income";
+  initialWalletId?: string;
 }
 
-export default function TransactionForm({ onSuccess, initialDate }: TransactionFormProps = {}) {
-  const [transactionType, setTransactionType] = useState<"expense" | "income" | "transfer">("expense");
+export default function TransactionForm({ onSuccess, initialDate, initialAmount, initialType, initialWalletId }: TransactionFormProps = {}) {
+  const [transactionType, setTransactionType] = useState<"expense" | "income" | "transfer">(initialType ?? "expense");
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      type: "expense",
-      amount: "",
+      type: initialType ?? "expense",
+      amount: initialAmount ?? "",
       description: "",
       date: initialDate && initialDate instanceof Date
         ? (() => {
@@ -89,7 +93,7 @@ export default function TransactionForm({ onSuccess, initialDate }: TransactionF
           })()
         : new Date().toISOString().split('T')[0],
       categoryId: "",
-      walletId: "",
+      walletId: initialWalletId ?? "",
       fromWalletId: "",
       toWalletId: "",
       repeatType: "never",

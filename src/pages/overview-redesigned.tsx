@@ -690,6 +690,7 @@ export default function OverviewRedesignedPage() {
               viewMode={viewMode}
               budget={viewMode === "month" ? monthBudget : null}
               formatCurrency={formatCurrency}
+              wallets={wallets}
             />
 
             {/* 5. Wallets */}
