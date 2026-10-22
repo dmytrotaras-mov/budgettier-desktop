@@ -227,7 +227,7 @@ export function InsightsCard({ transactions, categories, selectedDate, viewMode,
     if (viewMode === "month" && isSameMonth(selectedDate, now)) {
       const states = wallets
         .filter((w) => needsChecking(w, transactions, now))
-        .map((w) => ({ w, s: checkState(checks.find((c) => c.walletId === w.id), now) }));
+        .map((w) => ({ w, s: checkState(checks.find((c) => c.walletId === w.id), now, transactions) }));
       const off = states.filter((x) => x.s.kind === "off");
       const due = states.filter((x) => x.s.kind === "due" || x.s.kind === "never");
       if (off.length) {

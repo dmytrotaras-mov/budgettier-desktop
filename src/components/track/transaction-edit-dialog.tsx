@@ -18,6 +18,8 @@ import CategorySelector from "./category-selector-redesigned";
 import { WalletSelector } from "./wallet-selector";
 import { useCurrency } from "@/hooks/useCurrency";
 import { FileText, ChevronLeft, ChevronRight } from "lucide-react";
+import { checkpointImpact, useWalletChecks, type CheckpointImpact } from "@/lib/walletChecks";
+import { DialogShell } from "@/components/settings/dialog-shell";
 
 const transactionSchema = z.object({
   type: z.enum(["income", "expense"]),
@@ -51,7 +53,7 @@ interface TransactionEditDialogProps {
 export default function TransactionEditDialog({ transaction, isOpen, onClose, onDelete }: TransactionEditDialogProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { currencySymbol } = useCurrency();
+  const { currencySymbol, formatCurrency } = useCurrency();
 
   // Check if this is a transfer transaction
   const isTransfer = transaction?.type === 'transfer';
@@ -97,7 +99,7 @@ export default function TransactionEditDialog({ transaction, isOpen, onClose, on
     if (transaction && !isTransfer) {
       form.reset({
         type: transaction.type as "income" | "expense",
-        amount: transaction.amount.toString(),
+        amount: transaction.amount.toString().replace('.', ','),
         description: transaction.description || "",
         categoryId: transaction.categoryId || "",
         walletId: transaction.walletId || "",
@@ -106,7 +108,7 @@ export default function TransactionEditDialog({ transaction, isOpen, onClose, on
       });
     } else if (transaction && isTransfer) {
       transferForm.reset({
-        amount: transaction.amount.toString(),
+        amount: transaction.amount.toString().replace('.', ','),
         description: transaction.description || "",
         fromWalletId: transaction.fromWalletId || "",
         toWalletId: transaction.toWalletId || "",
@@ -192,6 +194,24 @@ export default function TransactionEditDialog({ transaction, isOpen, onClose, on
     },
   });
 
+  // Changing or deleting a transaction dated before a wallet's matching
+  // balance check would quietly break that check — ask first.
+  const { data: walletChecks = [] } = useWalletChecks();
+  const { data: allTransactions = [] } = useQuery<any[]>({ queryKey: ["/api/transactions"] });
+  const [pendingChange, setPendingChange] = useState<{ impacts: CheckpointImpact[]; deleting: boolean; run: () => void } | null>(null);
+  const guarded = (after: any | null, run: () => void) => {
+    if (!transaction) return run();
+    const impacts = checkpointImpact(walletChecks, allTransactions, transaction, after && { ...transaction, ...after });
+    if (impacts.length === 0) return run();
+    setPendingChange({ impacts, deleting: after === null, run });
+  };
+  const guardedDelete = () => {
+    if (transaction?.id && onDelete) {
+      const id = transaction.id;
+      guarded(null, () => onDelete(id));
+    }
+  };
+
   const onSubmit = (data: z.infer<typeof transactionSchema>) => {
     try {
       // Ensure date is valid before converting
@@ -200,11 +220,8 @@ export default function TransactionEditDialog({ transaction, isOpen, onClose, on
       // Convert comma to dot for decimal amounts (e.g., "90,89" -> "90.89")
       const normalizedAmount = data.amount.replace(',', '.');
 
-      updateTransactionMutation.mutate({
-        ...data,
-        amount: normalizedAmount,
-        date: dateValue.toISOString(),
-      });
+      const payload = { ...data, amount: normalizedAmount, date: dateValue.toISOString() };
+      guarded(payload, () => updateTransactionMutation.mutate(payload));
     } catch (error) {
       toast({
         title: "Error",
@@ -222,12 +239,8 @@ export default function TransactionEditDialog({ transaction, isOpen, onClose, on
       // Convert comma to dot for decimal amounts (e.g., "90,89" -> "90.89")
       const normalizedAmount = data.amount.replace(',', '.');
 
-      updateTransactionMutation.mutate({
-        type: "transfer",
-        ...data,
-        amount: normalizedAmount,
-        date: dateValue.toISOString(),
-      });
+      const payload = { type: "transfer", ...data, amount: normalizedAmount, date: dateValue.toISOString() };
+      guarded(payload, () => updateTransactionMutation.mutate(payload));
     } catch (error) {
       toast({
         title: "Error",
@@ -249,6 +262,7 @@ export default function TransactionEditDialog({ transaction, isOpen, onClose, on
   };
 
   return (
+    <>
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
@@ -286,6 +300,16 @@ export default function TransactionEditDialog({ transaction, isOpen, onClose, on
 
                     const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                       let inputValue = e.target.value;
+                      // A dot the user typed is a decimal point ("7.76"); dots already shown are
+                      // thousands separators from the display format ("1.234").
+                      const shownDots = (formatDisplayValue(field.value).match(/\./g) || []).length;
+                      if ((inputValue.match(/\./g) || []).length > shownDots && !inputValue.includes(',')) {
+                        const caret = (e.target.selectionStart ?? inputValue.length) - 1;
+                        const last = inputValue.lastIndexOf('.');
+                        // Typed at the caret, or pasted ("7.76"): the last dot followed by at most two digits.
+                        const dot = inputValue[caret] === '.' ? caret : /^\d{0,2}$/.test(inputValue.slice(last + 1)) ? last : -1;
+                        if (dot >= 0) inputValue = inputValue.slice(0, dot) + ',' + inputValue.slice(dot + 1);
+                      }
                       inputValue = inputValue.replace(/\./g, '');
                       if (inputValue === ',' || inputValue.startsWith(',')) {
                         inputValue = '0' + inputValue;
@@ -586,11 +610,7 @@ export default function TransactionEditDialog({ transaction, isOpen, onClose, on
                     type="button"
                     variant="outline"
                     className="w-full h-16 md:h-14 text-base font-semibold rounded-xl text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
-                    onClick={() => {
-                      if (transaction?.id && onDelete) {
-                        onDelete(transaction.id);
-                      }
-                    }}
+                    onClick={guardedDelete}
                   >
                     Delete Transaction
                   </Button>
@@ -625,11 +645,7 @@ export default function TransactionEditDialog({ transaction, isOpen, onClose, on
                   type="button"
                   variant="outline"
                   className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
-                  onClick={() => {
-                    if (transaction?.id && onDelete) {
-                      onDelete(transaction.id);
-                    }
-                  }}
+                  onClick={guardedDelete}
                 >
                   Delete Transaction
                 </Button>
@@ -673,6 +689,16 @@ export default function TransactionEditDialog({ transaction, isOpen, onClose, on
 
                 const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                   let inputValue = e.target.value;
+                  // A dot the user typed is a decimal point ("7.76"); dots already shown are
+                  // thousands separators from the display format ("1.234").
+                  const shownDots = (formatDisplayValue(field.value).match(/\./g) || []).length;
+                  if ((inputValue.match(/\./g) || []).length > shownDots && !inputValue.includes(',')) {
+                    const caret = (e.target.selectionStart ?? inputValue.length) - 1;
+                    const last = inputValue.lastIndexOf('.');
+                    // Typed at the caret, or pasted ("7.76"): the last dot followed by at most two digits.
+                    const dot = inputValue[caret] === '.' ? caret : /^\d{0,2}$/.test(inputValue.slice(last + 1)) ? last : -1;
+                    if (dot >= 0) inputValue = inputValue.slice(0, dot) + ',' + inputValue.slice(dot + 1);
+                  }
                   inputValue = inputValue.replace(/\./g, '');
                   if (inputValue === ',' || inputValue.startsWith(',')) {
                     inputValue = '0' + inputValue;
@@ -1000,11 +1026,7 @@ export default function TransactionEditDialog({ transaction, isOpen, onClose, on
                 type="button"
                 variant="outline"
                 className="w-full h-16 md:h-14 text-base font-semibold rounded-xl text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
-                onClick={() => {
-                  if (transaction?.id && onDelete) {
-                    onDelete(transaction.id);
-                  }
-                }}
+                onClick={guardedDelete}
               >
                 Delete Transaction
               </Button>
@@ -1014,5 +1036,41 @@ export default function TransactionEditDialog({ transaction, isOpen, onClose, on
         )}
       </DialogContent>
     </Dialog>
+    {pendingChange && (
+      <DialogShell
+        title={pendingChange.deleting ? "Delete a checked transaction?" : "Change a checked transaction?"}
+        onClose={() => setPendingChange(null)}
+        onSave={() => {
+          const { run } = pendingChange;
+          setPendingChange(null);
+          run();
+        }}
+        saveLabel={pendingChange.deleting ? "Delete anyway" : "Save anyway"}
+        canSave
+        danger
+      >
+        <p className="text-sm text-gray-600 -mt-1">
+          This transaction is dated before a balance check that matched the bank.{" "}
+          {pendingChange.deleting ? "Deleting" : "Changing"} it will make that check stop matching:
+        </p>
+        <div className="rounded-2xl bg-gray-50 px-4 py-2">
+          {pendingChange.impacts.map(({ walletId, check, newDiff }) => (
+            <div key={walletId} className="flex items-center justify-between gap-3 py-1.5 text-sm">
+              <span className="min-w-0 truncate">
+                <span className="font-medium text-gray-900">{wallets.find((w) => w.id === walletId)?.name ?? "Wallet"}</span>
+                <span className="text-gray-500"> · checked {format(new Date(check.checkedAt), "d MMM")}</span>
+              </span>
+              <span className="flex-shrink-0 tabular-nums text-red-600">
+                off by {formatCurrency(Math.abs(newDiff))}
+              </span>
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-gray-500">
+          Only do this if the transaction really was wrong — then check the wallet again to confirm it still matches the bank.
+        </p>
+      </DialogShell>
+    )}
+    </>
   );
 }

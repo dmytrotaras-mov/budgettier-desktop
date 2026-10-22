@@ -82,7 +82,7 @@ export default function TransactionForm({ onSuccess, initialDate, initialAmount,
     resolver: zodResolver(formSchema),
     defaultValues: {
       type: initialType ?? "expense",
-      amount: initialAmount ?? "",
+      amount: initialAmount?.replace(".", ",") ?? "",
       description: "",
       date: initialDate && initialDate instanceof Date
         ? (() => {
@@ -416,7 +416,18 @@ export default function TransactionForm({ onSuccess, initialDate, initialAmount,
               const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
                 let inputValue = e.target.value;
 
-                // Remove all dots (thousand separators) to get raw value
+                // A dot the user typed is a decimal point ("7.76"); dots already shown are
+                // thousands separators from the display format ("1.234").
+                const shownDots = (formatDisplayValue(field.value).match(/\./g) || []).length;
+                if ((inputValue.match(/\./g) || []).length > shownDots && !inputValue.includes(',')) {
+                  const caret = (e.target.selectionStart ?? inputValue.length) - 1;
+                  const last = inputValue.lastIndexOf('.');
+                  // Typed at the caret, or pasted ("7.76"): the last dot followed by at most two digits.
+                  const dot = inputValue[caret] === '.' ? caret : /^\d{0,2}$/.test(inputValue.slice(last + 1)) ? last : -1;
+                  if (dot >= 0) inputValue = inputValue.slice(0, dot) + ',' + inputValue.slice(dot + 1);
+                }
+
+                // Remove the remaining dots (thousand separators) to get raw value
                 inputValue = inputValue.replace(/\./g, '');
 
                 // If user types comma as first character, add "0," automatically

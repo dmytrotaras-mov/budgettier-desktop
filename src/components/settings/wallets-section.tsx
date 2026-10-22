@@ -159,7 +159,7 @@ export default function WalletsSection() {
                   </div>
                   {needsChecking(wallet, allTransactions) && (
                     <div className="text-[12px] mt-0.5">
-                      <WalletCheckStatus state={checkState(checkOf(wallet.id))} money={formatCurrency} />
+                      <WalletCheckStatus state={checkState(checkOf(wallet.id), new Date(), allTransactions)} money={formatCurrency} />
                     </div>
                   )}
                 </div>

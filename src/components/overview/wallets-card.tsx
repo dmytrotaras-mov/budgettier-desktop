@@ -94,7 +94,7 @@ export function WalletsCard({ wallets, transactions, selectedDate, viewMode, for
           {rows.map((w) => {
             const t = walletType(w.type);
             const share = positiveTotal > 0 && w.balance > 0 ? Math.round((w.balance / positiveTotal) * 100) : null;
-            const state = needsChecking(w, transactions) ? checkState(checkOf(w.id)) : null;
+            const state = needsChecking(w, transactions) ? checkState(checkOf(w.id), new Date(), transactions) : null;
             return (
               <div
                 key={w.id}

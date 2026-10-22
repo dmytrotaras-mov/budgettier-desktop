@@ -15,7 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 import { NEGATIVE, POSITIVE } from "@/lib/colors";
 import { WalletIcon } from "@/lib/walletUtils";
 import { displayMerchantName } from "@/lib/merchantName";
-import { WALLET_CHECKS_KEY, type WalletCheck } from "@/lib/walletChecks";
+import { WALLET_CHECKS_KEY, effectOn, type WalletCheck } from "@/lib/walletChecks";
 
 interface Props {
   wallet: any;
@@ -26,13 +26,7 @@ interface Props {
 
 type Stage = { kind: "enter" } | { kind: "match" } | { kind: "off"; bank: number; diff: number };
 
-/** Signed effect of a transaction on this wallet. */
-const effect = (t: any, walletId: string) => {
-  const a = parseFloat(t.amount);
-  if (t.type === "income") return t.walletId === walletId ? a : 0;
-  if (t.type === "expense") return t.walletId === walletId ? -a : 0;
-  return (t.toWalletId === walletId ? a : 0) - (t.fromWalletId === walletId ? a : 0);
-};
+const effect = effectOn;
 
 export function CheckBalanceDialog({ wallet, lastCheck: latestCheck, formatCurrency, onClose }: Props) {
   // The check before this one — saving a new check must not move the
