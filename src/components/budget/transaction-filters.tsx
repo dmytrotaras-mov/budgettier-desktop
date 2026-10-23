@@ -1,11 +1,13 @@
-// Filter bar for the transaction list: search, type and category as pill
-// chips that are always visible. An active filter turns black and gets an ×.
+// Filter bar for the transaction list: search, then type, category and wallet
+// as pill chips. An active filter turns black and gets an ×. The panel shows
+// the bar on demand (search button in its header).
 
-import { forwardRef, useMemo, useState, type ReactNode } from "react";
+import { forwardRef, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Check, ChevronDown, Search, X } from "lucide-react";
 import type { Category } from "@shared/schema";
+import { WalletIcon } from "@/lib/walletUtils";
 import { useSections, visibleSections, resolveCategorySection, isHiddenCategory, UNGROUPED_SECTION_NAME } from "@/lib/sectionUtils";
 
 export type TypeFilter = "all" | "expense" | "income" | "transfer";
@@ -62,6 +64,11 @@ export function TransactionFilters({
   categoryId,
   onCategory,
   categories,
+  walletId,
+  onWallet,
+  wallets,
+  focusKey,
+  onEscape,
 }: {
   search: string;
   onSearch: (v: string) => void;
@@ -70,9 +77,22 @@ export function TransactionFilters({
   categoryId: string;
   onCategory: (v: string) => void;
   categories: Category[];
+  walletId: string;
+  onWallet: (v: string) => void;
+  wallets: any[];
+  /** Changes when the bar is opened — the search field takes focus. */
+  focusKey?: number;
+  /** Esc in an empty search field (the panel closes the bar). */
+  onEscape?: () => void;
 }) {
   const [typeOpen, setTypeOpen] = useState(false);
   const [categoryOpen, setCategoryOpen] = useState(false);
+  const [walletOpen, setWalletOpen] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (focusKey) searchRef.current?.focus();
+  }, [focusKey]);
+  const selectedWallet = wallets.find((w) => w.id === walletId);
   const { data: allSections = [] } = useSections();
   const selected = categories.find((c) => c.id === categoryId);
 
@@ -106,8 +126,12 @@ export function TransactionFilters({
       <div className="relative flex-1 min-w-[120px]">
         <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
         <input
+          ref={searchRef}
           value={search}
           onChange={(e) => onSearch(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape" && !search) onEscape?.();
+          }}
           placeholder="Search"
           className="w-full h-9 rounded-full bg-gray-100 pl-9 pr-8 text-[13px] text-gray-900 placeholder:text-gray-500 outline-none focus:bg-white focus:ring-2 focus:ring-black/10 transition-colors"
         />
@@ -181,6 +205,34 @@ export function TransactionFilters({
               ))}
             </CommandList>
           </Command>
+        </PopoverContent>
+      </Popover>
+
+      {/* Wallet */}
+      <Popover open={walletOpen} onOpenChange={setWalletOpen}>
+        <PopoverTrigger asChild>
+          <Chip
+            active={!!selectedWallet}
+            label={selectedWallet ? <span className="max-w-[120px] truncate">{selectedWallet.name}</span> : "Wallet"}
+            onClear={() => onWallet("all")}
+          />
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-56 p-1 rounded-xl">
+          {wallets.map((w) => (
+            <button
+              key={w.id}
+              type="button"
+              onClick={() => {
+                onWallet(w.id);
+                setWalletOpen(false);
+              }}
+              className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-sm hover:bg-gray-100"
+            >
+              <WalletIcon wallet={w} size={26} />
+              <span className="flex-1 truncate text-left">{w.name}</span>
+              {walletId === w.id && <Check size={15} />}
+            </button>
+          ))}
         </PopoverContent>
       </Popover>
     </div>

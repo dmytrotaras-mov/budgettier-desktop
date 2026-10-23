@@ -20,6 +20,7 @@ function Delta({
   show,
   absolute,
   sinceLabel,
+  betterWorse,
   formatCurrency,
 }: {
   current: number;
@@ -29,6 +30,8 @@ function Delta({
   show: boolean;
   absolute?: boolean;
   sinceLabel?: boolean;
+  /** "€306 better than Sep": for values whose label flips (Saved / Overspent). */
+  betterWorse?: boolean;
   formatCurrency?: (n: number) => string;
 }) {
   if (!show) return <div className="h-4" />;
@@ -41,8 +44,10 @@ function Delta({
   return (
     <div className="text-[11px] font-medium h-4 flex items-center gap-1" style={{ color: good ? POSITIVE : NEGATIVE }}>
       {!absolute && <Pointer w={8} color={good ? POSITIVE : NEGATIVE} up={up} />}
-      <span className="tabular-nums">{text}</span>
-      <span className="text-gray-400 font-normal">{sinceLabel ? `since ${label}` : `vs ${label}`}</span>
+      <span className="tabular-nums">{betterWorse ? formatCurrency!(Math.abs(diff)) : text}</span>
+      <span className="text-gray-400 font-normal">
+        {betterWorse ? `${good ? "better" : "worse"} than ${label}` : sinceLabel ? `since ${label}` : `vs ${label}`}
+      </span>
     </div>
   );
 }
@@ -148,11 +153,18 @@ export function StatsBar({ selectedDate, viewMode, transactions, allTransactions
       <div className="stat-box flex flex-col justify-center items-center sm:items-start" style={{ flex: "1 1 auto", minWidth: 120 }}>
         <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
           <PiggyBank className="w-[16px] h-[16px] sm:w-[20px] sm:h-[20px]" style={{ color: "#EDE140" }} />
-          <p className="text-[13px] sm:text-[15px]" style={{ fontFamily: "Inter", color: "#000" }}>Savings</p>
+          {/* "Saved", not "Savings": income minus spending, not a savings account. */}
+          <p className="text-[13px] sm:text-[15px]" style={{ fontFamily: "Inter", color: "#000" }}>Saved</p>
         </div>
         <div className="flex items-center gap-2">
-          <p className="text-[20px] sm:text-[24px]" style={{ fontFamily: "Inter", fontWeight: 700, color: "#000" }}>
-            {formatCurrency(totalIncome - totalExpenses)}
+          {/* Signed, with a real minus before the currency ("−€1,996.70"). Red only
+              once income has arrived — before payday a minus is just "not yet". */}
+          <p
+            className="text-[20px] sm:text-[24px] tabular-nums"
+            style={{ fontFamily: "Inter", fontWeight: 700, color: totalIncome - totalExpenses < 0 && !incomeTooLow ? NEGATIVE : "#000" }}
+          >
+            {totalIncome - totalExpenses < 0 ? "−" : ""}
+            {formatCurrency(Math.abs(totalIncome - totalExpenses))}
           </p>
           {incomeTooLow ? (
             <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 whitespace-nowrap">no income yet</span>
@@ -169,6 +181,7 @@ export function StatsBar({ selectedDate, viewMode, transactions, allTransactions
           label={comparison.label}
           show={comparison.hasPrev}
           absolute
+          betterWorse
           formatCurrency={roundMoney}
         />
       </div>

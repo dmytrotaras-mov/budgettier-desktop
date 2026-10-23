@@ -5,7 +5,8 @@
 import { Area, CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { NEGATIVE } from "@/lib/colors";
 
-export const PACE_COLORS = { current: NEGATIVE, band: "#9CA3AF", budget: "#6B7280" };
+// The budget plan is a reference line: quieter than the data and drawn under it.
+export const PACE_COLORS = { current: NEGATIVE, band: "#9CA3AF", budget: "#9CA3AF" };
 
 interface Point {
   day: number;
@@ -71,8 +72,8 @@ export function SpendingPaceChart({ data, monthLabel, todayDay, budgetTotal, vis
           <ReferenceLine
             y={budgetTotal}
             stroke={PACE_COLORS.budget}
-            strokeWidth={1}
-            label={{ value: `Budget ${axisMoney(budgetTotal)}`, position: "insideTopLeft", fontSize: 11, fill: "#6B7280", dy: -2 }}
+            strokeWidth={1.5}
+            label={{ value: `Budget plan ${axisMoney(budgetTotal)}`, position: "insideTopLeft", fontSize: 11, fill: "#6B7280", dy: -2 }}
           />
         ) : null}
         {visible.forecast && (
@@ -95,7 +96,8 @@ export function SpendingPaceChart({ data, monthLabel, todayDay, budgetTotal, vis
             }
             label={(p: any) =>
               todayDay && p.index === todayDay - 1 && last?.currentMonth !== undefined ? (
-                <text key={`l-${p.index}`} x={p.x} y={p.y - 12} textAnchor="middle" fontSize={11} fontWeight={600} fill="#111827">
+                // White halo: the value stays readable where it sits on the budget line.
+                <text key={`l-${p.index}`} x={p.x} y={p.y - 12} textAnchor="middle" fontSize={11} fontWeight={600} fill="#111827" stroke="#fff" strokeWidth={4} strokeLinejoin="round" paintOrder="stroke">
                   {axisMoney(last.currentMonth)}
                 </text>
               ) : (

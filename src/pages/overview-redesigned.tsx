@@ -1,3 +1,4 @@
+import { useSelectedMonth } from "@/hooks/useSelectedMonth";
 import { useState, useMemo, useCallback } from "react";
 import { POSITIVE, NEGATIVE, INK, withAlpha } from "@/lib/colors";
 import { useQuery } from "@tanstack/react-query";
@@ -207,7 +208,7 @@ function renderExpandedPanel(panelId: string, data: any, formatCurrency: (amount
 }
 
 export default function OverviewRedesignedPage() {
-  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useSelectedMonth();
   const [viewMode, setViewMode] = useState<"month" | "year">("month");
   const [expandedPanel, setExpandedPanel] = useState<string | null>(null);
   const [categoryViewMode, setCategoryViewModeState] = useState<BreakdownMode>(() => {
@@ -414,9 +415,10 @@ export default function OverviewRedesignedPage() {
   // Reuse yearsProgressData instead of calling calculateYearsProgress twice
   const multiYearBudgetData = yearsProgressData;
 
-  const handlePreviousMonth = useCallback(() => setSelectedDate(viewMode === "month" ? subMonths(selectedDate, 1) : new Date(selectedDate.getFullYear() - 1, 0, 1)), [viewMode, selectedDate]);
-  const handleNextMonth = useCallback(() => setSelectedDate(viewMode === "month" ? addMonths(selectedDate, 1) : new Date(selectedDate.getFullYear() + 1, 0, 1)), [viewMode, selectedDate]);
-  const handleToday = useCallback(() => setSelectedDate(new Date()), []);
+  // Year view steps whole years but keeps the month, so Budget still opens on it.
+  const handlePreviousMonth = useCallback(() => setSelectedDate(viewMode === "month" ? subMonths(selectedDate, 1) : subMonths(selectedDate, 12)), [viewMode, selectedDate, setSelectedDate]);
+  const handleNextMonth = useCallback(() => setSelectedDate(viewMode === "month" ? addMonths(selectedDate, 1) : addMonths(selectedDate, 12)), [viewMode, selectedDate, setSelectedDate]);
+  const handleToday = useCallback(() => setSelectedDate(new Date()), [setSelectedDate]);
 
   const axisMoney = compactMoney(currencySymbol);
 
@@ -587,7 +589,7 @@ export default function OverviewRedesignedPage() {
                         ...(currentMonthProgression?.projectedTotal != null
                           ? [{ key: "forecast", label: "Forecast", color: NEGATIVE, dashed: true, active: panel2ChartVisibility.forecast }]
                           : []),
-                        ...(budgetTotal ? [{ key: "budget", label: "Budget", color: "#6B7280", active: panel2ChartVisibility.budget }] : []),
+                        ...(budgetTotal ? [{ key: "budget", label: "Budget plan", color: "#9CA3AF", active: panel2ChartVisibility.budget }] : []),
                       ]
                     : [
                         { key: "yearIncome", label: "Income", color: POSITIVE, active: panel2ChartVisibility.yearIncome },

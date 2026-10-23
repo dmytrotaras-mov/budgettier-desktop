@@ -8,7 +8,7 @@
 // any data. A Flex budget is one limit that covers every category without
 // its own.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { format } from "date-fns";
 import { ChevronDown, Pencil, Plus, Repeat } from "lucide-react";
 import { EntityIcon } from "@/components/ui/entity-icon";
@@ -35,6 +35,8 @@ interface Props {
   moveTargets: { id: string; name: string; emoji: string }[];
   money: (n: number) => string;
   defaultOpen?: boolean;
+  /** Changes when something asks for the review (opens it and scrolls to it). */
+  openSignal?: number;
   onAddLimit: (item: OutsideItem, amount: number) => void;
   onEditLimit: (item: OutsideItem) => void;
   onAddAll: (items: OutsideItem[]) => void;
@@ -46,10 +48,16 @@ interface Props {
 
 const pillBase = "inline-flex items-center gap-1 h-7 px-3 rounded-full text-[12px] font-medium whitespace-nowrap transition-colors";
 
-export function OutsideBudgetCard({ items, flex, dismissed, moveTargets, money, defaultOpen, onAddLimit, onEditLimit, onAddAll, onDismiss, onMove, onExclude, onFlex }: Props) {
+export function OutsideBudgetCard({ items, flex, dismissed, moveTargets, money, defaultOpen, openSignal, onAddLimit, onEditLimit, onAddAll, onDismiss, onMove, onExclude, onFlex }: Props) {
   const [open, setOpen] = useState(!!defaultOpen);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showDismissed, setShowDismissed] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!openSignal) return;
+    setOpen(true);
+    requestAnimationFrame(() => rootRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }, [openSignal]);
 
   const total = items.reduce((s, i) => s + i.spent, 0);
   const pending = items.filter((i) => !dismissed.has(i.categoryId));
@@ -62,7 +70,7 @@ export function OutsideBudgetCard({ items, flex, dismissed, moveTargets, money, 
   const flexOver = flex ? total - flex.limit : 0;
 
   return (
-    <div className="mt-4 rounded-2xl p-3 pl-4" style={{ backgroundColor: "#F9FAFB" }}>
+    <div ref={rootRef} className="mt-4 rounded-2xl p-3 pl-4 scroll-mt-4" style={{ backgroundColor: "#F9FAFB" }}>
       {/* Header */}
       <div className="flex items-center gap-3">
         <button type="button" onClick={() => setOpen(!open)} className="min-w-0 flex-1 text-left focus:outline-none">

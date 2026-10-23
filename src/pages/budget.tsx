@@ -9,9 +9,10 @@ import BudgetPlanPanel from "@/components/budget/budget-plan-panel";
 import ResponsiveContainer from "@/components/layout/responsive-container";
 import { startOfMonth, endOfMonth, format, addMonths, subMonths } from "date-fns";
 import { StatsBar } from "@/components/overview/stats-bar";
+import { useSelectedMonth } from "@/hooks/useSelectedMonth";
 
 export default function BudgetPage() {
-  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useSelectedMonth();
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [selectedTransactionDate, setSelectedTransactionDate] = useState<Date | null>(null);
   const [mobilePanelView, setMobilePanelView] = useState<'transactions' | 'budget'>('transactions');

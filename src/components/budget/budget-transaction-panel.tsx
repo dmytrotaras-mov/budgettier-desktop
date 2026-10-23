@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { POSITIVE, NEGATIVE } from "@/lib/colors";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -6,7 +6,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { format, isToday, isYesterday, isSameDay, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, getDay } from "date-fns";
-import { Wallet as WalletIcon, TrendingUp, TrendingDown, ArrowRight, Plus, ListFilter, List, Calendar, FileUp } from "lucide-react";
+import { Wallet as WalletIcon, TrendingUp, TrendingDown, ArrowRight, Plus, ListFilter, List, Calendar, FileUp, Search as SearchIcon } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { useCurrency } from "@/hooks/useCurrency";
@@ -102,6 +102,25 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
   const [search, setSearch] = useState("");
+  const [walletFilter, setWalletFilter] = useState<string>("all");
+  // The search/filter bar is shown on demand; focusKey moves focus into it.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [focusKey, setFocusKey] = useState(0);
+  const openFilters = () => {
+    setFiltersOpen(true);
+    setFocusKey((k) => k + 1);
+  };
+  // ⌘F / Ctrl+F opens the bar and puts the cursor in search.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        openFilters();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<Date | null>(null);
@@ -118,6 +137,7 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
   const { data: categories = [] } = useQuery<Category[]>({
     queryKey: ["/api/categories"],
   });
+
 
   const { data: wallets = [] } = useQuery<Wallet[]>({
     queryKey: ["/api/wallets"],
@@ -184,6 +204,7 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
       }
     }
     if (typeFilter !== "all" && transaction.type !== typeFilter) return false;
+    if (walletFilter !== "all" && ![transaction.walletId, transaction.fromWalletId, transaction.toWalletId].includes(walletFilter)) return false;
     if (query) {
       const category = categories.find((c) => c.id === transaction.categoryId);
       const haystack = [
@@ -196,7 +217,7 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
     }
     return true;
   });
-  const filtersActive = categoryFilter !== "all" || typeFilter !== "all" || query !== "";
+  const filtersActive = categoryFilter !== "all" || typeFilter !== "all" || walletFilter !== "all" || query !== "";
   const filteredNet = filteredTransactions.reduce(
     (sum, t) => sum + (t.type === "income" ? 1 : t.type === "expense" ? -1 : 0) * parseFloat(t.amount),
     0,
@@ -204,6 +225,7 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
   const clearFilters = () => {
     setCategoryFilter("all");
     setTypeFilter("all");
+    setWalletFilter("all");
     setSearch("");
   };
 
@@ -289,11 +311,11 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
         className="bg-white overflow-hidden"
         style={{ flex: 1, aspectRatio: '525 / 632', display: 'flex', flexDirection: 'column', borderRadius: '20px' }}
       >
-        {/* Header — same two-row grid as the Budget panel: title, tabs and
-            actions on one line; filters on the second. */}
+        {/* Header — the same shape as the Budget plan panel: title on the
+            left, controls on the right; filters on the second row. */}
         <div style={{ padding: '16px 20px 14px', borderBottom: '1px solid #F3F4F6' }}>
-          <div className="flex items-center gap-x-4 gap-y-2 flex-wrap">
-            <h2 className="hidden md:block" style={{ fontFamily: 'Inter', fontSize: '22px', fontWeight: 500, color: '#000' }}>
+          <div className="flex items-center gap-x-3 gap-y-2 flex-wrap">
+            <h2 className="hidden md:block mr-auto" style={{ fontFamily: 'Inter', fontSize: '22px', fontWeight: 500, color: '#000' }}>
               Transactions
             </h2>
             <PillTabs
@@ -302,7 +324,21 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
               onChange={setViewMode}
               size="sm"
             />
-            <div className="flex items-center gap-2 ml-auto">
+            <div className="flex items-center gap-2">
+              {/* Search and filters — opens the bar below; a dot means the list is filtered */}
+              <Button
+                onClick={() => (filtersOpen ? setFiltersOpen(false) : openFilters())}
+                title="Search and filter (⌘F)"
+                aria-label="Search and filter"
+                aria-expanded={filtersOpen}
+                style={{ height: 40, width: 40, minWidth: 40, padding: 0, borderRadius: 30, position: "relative" }}
+                className={filtersOpen ? "bg-black text-white hover:bg-gray-800" : "bg-[#F3F4F6] text-black hover:bg-black hover:text-white"}
+              >
+                <SearchIcon className="w-[18px] h-[18px]" />
+                {filtersActive && !filtersOpen && (
+                  <span className="absolute top-2 right-2 h-2 w-2 rounded-full" style={{ backgroundColor: "#111827", boxShadow: "0 0 0 2px #F3F4F6" }} />
+                )}
+              </Button>
               {/* Import Wise statement — same dialog as Settings → Data */}
               <Button
                 onClick={() => setImportOpen(true)}
@@ -325,17 +361,30 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
             </div>
           </div>
 
-          <div className="mt-3 min-h-[58px] flex items-center">
-            <div className="w-full min-w-0">
-            <TransactionFilters
-              search={search}
-              onSearch={setSearch}
-              type={typeFilter}
-              onType={setTypeFilter}
-              categoryId={categoryFilter}
-              onCategory={setCategoryFilter}
-              categories={categories}
-            />
+          {/* Slides open under the header (grid rows 0fr → 1fr). */}
+          <div
+            className="grid transition-[grid-template-rows,opacity] duration-200 ease-out"
+            style={{ gridTemplateRows: filtersOpen ? "1fr" : "0fr", opacity: filtersOpen ? 1 : 0 }}
+            aria-hidden={!filtersOpen}
+            {...(filtersOpen ? {} : ({ inert: "" } as any))}
+          >
+            <div className="overflow-hidden min-w-0">
+              <div className="pt-3 px-0.5 pb-0.5">
+                <TransactionFilters
+                  search={search}
+                  onSearch={setSearch}
+                  type={typeFilter}
+                  onType={setTypeFilter}
+                  categoryId={categoryFilter}
+                  onCategory={setCategoryFilter}
+                  categories={categories}
+                  walletId={walletFilter}
+                  onWallet={setWalletFilter}
+                  wallets={wallets}
+                  focusKey={focusKey}
+                  onEscape={() => setFiltersOpen(false)}
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -364,9 +413,18 @@ export default function BudgetTransactionPanel({ dateRange, selectedDate, onAddT
               <h3 className="text-lg font-medium text-gray-900 mb-2">No transactions found</h3>
               <p className="text-gray-600 text-center">
                 {filtersActive
-                  ? "Try adjusting your filters to see more transactions."
+                  ? "Nothing matches these filters this month."
                   : "Start by adding your first transaction."}
               </p>
+              {filtersActive && (
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="mt-4 h-9 px-4 rounded-full bg-[#F3F4F6] text-[13px] font-medium text-black hover:bg-black hover:text-white transition-colors"
+                >
+                  Clear filters
+                </button>
+              )}
             </div>
           ) : (
             <div className="space-y-1">

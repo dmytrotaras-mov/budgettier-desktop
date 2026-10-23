@@ -12,6 +12,8 @@ import { PillTabs } from "@/components/overview/category-breakdown";
 import { BudgetStatusList, BudgetSummary, type BudgetItem, type BudgetView, type MonthPlan } from "./budget-status-list";
 import { OutsideBudgetCard, type OutsideItem } from "./outside-budget-card";
 import { IncomeMenu, type IncomeMode } from "./income-menu";
+import { CategoryBudgetDialog } from "./category-budget-dialog";
+import TransactionEditDialog from "@/components/track/transaction-edit-dialog";
 import { DialogShell, Field, textInput } from "@/components/settings/dialog-shell";
 import { useToast } from "@/hooks/use-toast";
 import { apiCall, apiRequest } from "@/lib/queryClient";
@@ -296,12 +298,11 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
     }
   });
 
-  // How far into the selected month we are: drives the "today" marker.
+  // Where the selected month stands: days left, and whether it is over.
   const today = new Date();
   const daysInMonth = getDaysInMonth(selectedDate);
   const isThisMonth = isSameMonth(selectedDate, today);
   const isPastMonth = !isThisMonth && selectedDate < today;
-  const pace = isThisMonth ? today.getDate() / daysInMonth : isPastMonth ? 1 : null;
   const daysLeft = isThisMonth ? daysInMonth - today.getDate() + 1 : isPastMonth ? 0 : null;
 
   // Income the month is planned around (see IncomeMenu).
@@ -366,6 +367,7 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
     if (!allocation.categoryId) return sum;
     return sum + calculateCategorySpending(allocation.categoryId);
   }, 0);
+
 
   const addBudgetAllocationMutation = useMutation({
     mutationFn: (allocation: { budgetPlanId: string; categoryId: string; allocatedAmount: string }) =>
@@ -453,6 +455,17 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
     }
   };
   const [flexOpen, setFlexOpen] = useState(false);
+  const [outsideSignal, setOutsideSignal] = useState(0);
+  // Clicking a budget line opens its card: transactions first, limit to edit.
+  const [cardAllocationId, setCardAllocationId] = useState<string | null>(null);
+  const [openTx, setOpenTx] = useState<any | null>(null);
+  const cardAllocation = budgetAllocations.find((a) => a.id === cardAllocationId) ?? null;
+  const cardCategory = cardAllocation ? categories.find((c) => c.id === cardAllocation.categoryId) ?? null : null;
+  const cardTransactions = cardCategory
+    ? transactions
+        .filter((t: any) => t.type === "expense" && !t.isOpening && t.categoryId === cardCategory.id)
+        .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    : [];
   // What the small categories without a limit usually cost per month. Big
   // ones (€150+ a month) deserve their own limit, so they're left out.
   const BIG_CATEGORY = 150;
@@ -482,13 +495,6 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
     setEditingAllocationId(null);
     setSelectedCategoryId("");
     setBudgetAmount("");
-    setIsEditModalOpen(true);
-  };
-
-  const handleEditAllocation = (allocation: BudgetCategoryAllocation) => {
-    setEditingAllocationId(allocation.id);
-    setSelectedCategoryId(allocation.categoryId || "");
-    setBudgetAmount(allocation.allocatedAmount);
     setIsEditModalOpen(true);
   };
 
@@ -525,12 +531,12 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
         className="bg-white overflow-hidden"
         style={{ flex: 1, aspectRatio: '525 / 632', minWidth: 0, display: 'flex', flexDirection: 'column', borderRadius: '20px' }}
       >
-        {/* Header — same two-row grid as the Transactions panel: title, tabs
-            and the add button on one line; the month summary on the second. */}
+        {/* Header — title on the left, controls on the right; the month's
+            numbers below. */}
         <div style={{ padding: '16px 20px 14px', borderBottom: '1px solid #F3F4F6' }}>
-          <div className="flex items-center gap-x-4 gap-y-2 flex-wrap">
-            <h2 className="hidden md:block" style={{ fontFamily: 'Inter', fontSize: '22px', fontWeight: 500, color: '#000' }}>
-              Budget
+          <div className="flex items-center gap-x-3 gap-y-2 flex-wrap">
+            <h2 className="hidden md:block mr-auto" style={{ fontFamily: 'Inter', fontSize: '22px', fontWeight: 500, color: '#000' }}>
+              Budget plan
             </h2>
             <PillTabs
               tabs={[["status", "Status"], ["groups", "Groups"]]}
@@ -543,7 +549,7 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
               title="Add a category to the budget"
               aria-label="Add a category to the budget"
               style={{ height: 40, width: 40, minWidth: 40, padding: 0, borderRadius: 30 }}
-              className="bg-[#F3F4F6] text-black hover:bg-black hover:text-white ml-auto"
+              className="bg-[#F3F4F6] text-black hover:bg-black hover:text-white"
             >
               <Plus className="w-5 h-5" />
             </Button>
@@ -554,7 +560,9 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
               <BudgetSummary
                 items={statusItems}
                 plan={monthPlan}
+                onOutside={() => setOutsideSignal((n) => n + 1)}
                 monthName={monthName}
+                daysLeft={daysLeft}
                 incomeControl={(trigger) => (
                   <IncomeMenu
                     monthName={monthName}
@@ -568,8 +576,6 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
                     {trigger}
                   </IncomeMenu>
                 )}
-                pace={pace}
-                daysLeft={daysLeft}
                 formatCurrency={(n) => formatCurrency(n)}
               />
             </div>
@@ -631,12 +637,8 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
               view={budgetView}
               sectionOrder={sectionRank}
               groupColor={(section) => sectionColor(allSections, section, "expense")}
-              pace={pace}
               formatCurrency={(n) => formatCurrency(n)}
-              onEdit={(id) => {
-                const allocation = budgetAllocations.find((a) => a.id === id);
-                if (allocation) handleEditAllocation(allocation);
-              }}
+              onEdit={(id) => setCardAllocationId(id)}
               footer={
                 <OutsideBudgetCard
                   items={outsideItems}
@@ -645,6 +647,7 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
                   moveTargets={moveTargets}
                   money={(n) => formatCurrency(Math.round(n)).replace(/\.00$/, "")}
                   defaultOpen={openOutside}
+                  openSignal={outsideSignal}
                   onAddLimit={addLimit}
                   onEditLimit={(item) => {
                     setEditingAllocationId(null);
@@ -663,6 +666,59 @@ export default function BudgetPlanPanel({ dateRange, selectedDate }: BudgetPlanP
           )}
         </div>
       </div>
+
+      {cardAllocation && cardCategory && (
+        <CategoryBudgetDialog
+          name={cardCategory.name.trim()}
+          emoji={getCategoryEmoji(cardCategory)}
+          color={sectionColor(allSections, resolveCategorySection(cardCategory), "expense")}
+          limit={parseFloat(cardAllocation.allocatedAmount || "0")}
+          transactions={cardTransactions}
+          money={(n) => formatCurrency(n)}
+          onClose={() => setCardAllocationId(null)}
+          onSave={async (limit) => {
+            try {
+              await apiCall("PUT", `/api/budget-allocations/${cardAllocation.id}`, { allocatedAmount: limit.toFixed(2) });
+              refreshBudget();
+              setCardAllocationId(null);
+              toast({ title: `${cardCategory.name.trim()} limit saved`, description: `${formatCurrency(limit)} a month` });
+            } catch (err) {
+              fail("Couldn't save the limit")(err);
+            }
+          }}
+          onRemove={async () => {
+            try {
+              await apiCall("DELETE", `/api/budget-allocations/${cardAllocation.id}`);
+              refreshBudget();
+              setCardAllocationId(null);
+              toast({ title: `${cardCategory.name.trim()} removed from the budget` });
+            } catch (err) {
+              fail("Couldn't remove it from the budget")(err);
+            }
+          }}
+          onOpenTransaction={(tx) => {
+            setCardAllocationId(null);
+            setOpenTx(tx);
+          }}
+        />
+      )}
+
+      <TransactionEditDialog
+        transaction={openTx}
+        isOpen={!!openTx}
+        onClose={() => setOpenTx(null)}
+        onDelete={async (id) => {
+          if (!window.confirm("Delete this transaction?")) return;
+          try {
+            await apiCall("DELETE", `/api/transactions/${id}`);
+            refreshAll();
+            setOpenTx(null);
+            toast({ title: "Transaction deleted" });
+          } catch (err) {
+            fail("Couldn't delete the transaction")(err);
+          }
+        }}
+      />
 
       {flexOpen && (
         <FlexDialog

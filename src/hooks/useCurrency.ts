@@ -21,11 +21,14 @@ export function useCurrency() {
   
   const formatCurrency = (amount: number | string) => {
     const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
+    // A real minus before the symbol: "−€5.93", not "€-5.93".
+    const sign = numAmount < 0 && Math.abs(numAmount) >= 0.005 ? '−' : '';
+    const abs = Math.abs(numAmount);
     // JPY doesn't use decimal places
     if (currency === 'JPY') {
-      return `${currencySymbol}${Math.round(numAmount)}`;
+      return `${sign}${currencySymbol}${Math.round(abs)}`;
     }
-    return `${currencySymbol}${numAmount.toFixed(2)}`;
+    return `${sign}${currencySymbol}${abs.toFixed(2)}`;
   };
   
   return { currencySymbol, currency, formatCurrency };
